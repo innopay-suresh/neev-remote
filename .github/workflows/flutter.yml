@@ -1,0 +1,154 @@
+name: Build Flutter Desktop App
+
+on:
+  push:
+    branches: [main]
+    tags:
+      - 'flutter-v*.*.*'
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  # Must provide Dart >= 3.10 (see neev_remote/pubspec.yaml).
+  FLUTTER_VERSION: '3.38.5'
+  # Signaling-server URL baked into every installer so installs auto-connect to
+  # the deployment server (no first-run prompt, no stale IP). Change this to the
+  # server you serve the installers from. Leave EMPTY to ask on first run.
+  RELAY_URL: 'ws://172.17.17.77:8080/ws'
+
+jobs:
+  # ---- Native desktop packages: installer + portable, built on each OS ----
+  build-desktop:
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            platform: linux
+          - os: macos-14
+            platform: macos
+          - os: windows-latest
+            platform: windows
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+
+      # Cache only the immutable package downloads. Caching .dart_tool/ causes
+      # a stale "build/native_assets/<os> not found" install failure on reruns.
+      - name: Cache pub
+        uses: actions/cache@v4
+        with:
+          path: ~/.pub-cache
+          key: ${{ runner.os }}-pubcache-${{ hashFiles('neev_remote/pubspec.lock') }}
+          restore-keys: ${{ runner.os }}-pubcache-
+
+      - name: Install Linux deps
+        if: matrix.platform == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build pkg-config \
+            libgtk-3-dev liblzma-dev libx11-dev libxtst-dev zip
+
+      - name: Install Inno Setup (Windows installer)
+        if: matrix.platform == 'windows'
+        run: choco install innosetup -y
+
+      - name: flutter pub get
+        run: cd neev_remote && flutter pub get
+
+      - name: Build + package (Linux)
+        if: matrix.platform == 'linux'
+        run: bash neev_remote/packaging/build_linux.sh
+
+      - name: Build + package (macOS)
+        if: matrix.platform == 'macos'
+        run: bash neev_remote/packaging/build_macos.sh
+
+      - name: Build + package (Windows)
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          $env:PATH += ";C:\Program Files (x86)\Inno Setup 6"
+          ./neev_remote/packaging/build_windows.ps1
+
+      - name: Upload packages
+        uses: actions/upload-artifact@v4
+        continue-on-error: true   # artifact storage quota may be hit; non-fatal
+        with:
+          name: neev-remote-${{ matrix.platform }}
+          path: neev_remote/dist/*
+          retention-days: 2
+
+      # Artifact-quota workaround: also publish the desktop installers to a
+      # rolling prerelease (release assets don't count against the artifact
+      # storage quota), so they're always downloadable even when artifacts fail.
+      - name: Publish installer to CI release
+        if: matrix.platform != 'web'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ci-${{ matrix.platform }}
+          prerelease: true
+          name: CI ${{ matrix.platform }} latest
+          files: neev_remote/dist/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ---- Web package (static site) ----
+  build-web:
+    runs-on: ubuntu-22.04
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+      - run: sudo apt-get update && sudo apt-get install -y zip
+      - run: cd neev_remote && flutter pub get
+      - run: bash neev_remote/packaging/build_web.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: neev-remote-web
+          path: neev_remote/dist/NeevRemote-web.zip
+          retention-days: 2
+
+  # ---- Publish a GitHub Release on flutter-v* tags ----
+  release-flutter:
+    needs: [build-desktop, build-web]
+    if: startsWith(github.ref, 'refs/tags/flutter-')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Collect release files
+        run: |
+          mkdir -p release
+          find artifacts -type f \
+            \( -name '*.exe' -o -name '*.dmg' -o -name '*.pkg' -o -name '*.zip' -o -name '*.tar.gz' \) \
+            -exec cp {} release/ \;
+          ls -la release/
+      - name: Upload to Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/*
+          tag_name: ${{ github.ref_name }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

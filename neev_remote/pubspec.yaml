@@ -1,0 +1,61 @@
+name: neev_remote
+description: "Neev Remote - Cross-platform Remote Desktop Application"
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.10.4
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # UI Components
+  cupertino_icons: ^1.0.8
+  google_fonts: ^6.2.1
+  flutter_animate: ^4.5.0
+
+  # WebRTC & Networking
+  flutter_webrtc: ^0.12.0+hotfix.1
+  web_socket_channel: ^3.0.0
+  uuid: ^4.5.1
+
+  # File transfer (native open dialog, desktop + web)
+  file_selector: ^1.0.3
+
+  # Clipboard images (native, no Rust toolchain — unlike super_clipboard)
+  pasteboard: ^0.2.0
+
+  # Drag-and-drop files onto the window to send them
+  desktop_drop: ^0.4.4
+
+  # State Management
+  flutter_riverpod: ^2.6.1
+  riverpod_annotation: ^2.6.1
+
+  # Navigation
+  go_router: ^14.6.2
+
+  # Window Management (desktop only - using conditional import)
+  # window_manager: ^0.4.3  # Desktop only, imported conditionally
+
+  # Local Storage
+  shared_preferences: ^2.3.4
+  path_provider: ^2.1.5
+
+  # Utilities
+  collection: ^1.18.0
+  equatable: ^2.0.7
+
+  # Platform info
+  platform_info: ^5.0.0
+  hashlib: ^2.3.4
+  http: ^1.6.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
