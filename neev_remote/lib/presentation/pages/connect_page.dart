@@ -722,7 +722,18 @@ class _DiscoveryPage extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final disc = ref.watch(discoveryProvider);
-    final devices = disc.devices;
+    final service = ref.watch(remoteServiceProvider);
+    // Merge LAN broadcast (UDP) + server-assisted (relay) discovery, deduped by
+    // id — the relay path finds machines even when the network blocks UDP.
+    final byId = <String, DiscoveredDevice>{};
+    for (final d in disc.devices) {
+      byId[d.id] = d;
+    }
+    for (final d in service.serverPeers) {
+      byId[d.id] = d;
+    }
+    final devices = byId.values.toList()
+      ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
     return SingleChildScrollView(
       padding: const EdgeInsets.all(AppSpacing.xl),
       child: Center(

@@ -11,6 +11,8 @@ enum SignalingMessageType {
   candidate,
   bye,
   error,
+  discover,
+  peers,
 }
 
 /// Signaling message
@@ -63,6 +65,10 @@ class SignalingMessage {
         return SignalingMessageType.bye;
       case 'error':
         return SignalingMessageType.error;
+      case 'peers':
+        return SignalingMessageType.peers;
+      case 'discover':
+        return SignalingMessageType.discover;
       default:
         return SignalingMessageType.register;
     }
@@ -86,6 +92,10 @@ class SignalingMessage {
         return 'bye';
       case SignalingMessageType.error:
         return 'error';
+      case SignalingMessageType.discover:
+        return 'discover';
+      case SignalingMessageType.peers:
+        return 'peers';
     }
   }
 }
@@ -214,6 +224,12 @@ class SignalingService {
       type: SignalingMessageType.bye,
       to: to,
     ));
+  }
+
+  /// Asks the relay which other hosts share this machine's public IP (LAN-mate
+  /// discovery that works even when UDP broadcast is blocked).
+  void sendDiscover() {
+    send(SignalingMessage(type: SignalingMessageType.discover));
   }
 
   Future<void> disconnect() async {

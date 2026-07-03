@@ -13,6 +13,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/constants/app_constants.dart';
 import 'auth_service.dart';
+import 'discovery_model.dart';
 import 'file_store.dart';
 import 'file_transfer_service.dart';
 import 'input_event.dart';
@@ -188,6 +189,14 @@ class RemoteService extends ChangeNotifier {
   final Map<String, WebRTCService> _hostPeers = {};
   HostStatus _hostStatus = HostStatus.offline;
   String? _agentId;
+
+  // Server-assisted discovery: the relay groups hosts by public IP and tells us
+  // our LAN-mates, so discovery works even where UDP broadcast is blocked.
+  Timer? _discoverTimer;
+  final Map<String, DiscoveredDevice> _serverPeers = {};
+
+  /// Hosts the relay reports on our network (from the last `peers` reply).
+  List<DiscoveredDevice> get serverPeers => _serverPeers.values.toList();
   String? _password;
   String? _hostError;
 
@@ -355,6 +364,9 @@ class RemoteService extends ChangeNotifier {
     await _hostSignaling?.disconnect();
     _hostSignaling = null;
     _agentId = null;
+    _discoverTimer?.cancel();
+    _discoverTimer = null;
+    _serverPeers.clear();
     _hostStatus = HostStatus.offline;
     notifyListeners();
   }
@@ -364,7 +376,11 @@ class RemoteService extends ChangeNotifier {
       case SignalingMessageType.registered:
         _agentId = msg.payload?['agent_id'] as String?;
         _hostStatus = HostStatus.online;
+        _startServerDiscovery();
         notifyListeners();
+        break;
+      case SignalingMessageType.peers:
+        _onServerPeers(msg.payload);
         break;
       case SignalingMessageType.connect:
         // A controller wants in. msg.from is the controller's routing id.
@@ -396,6 +412,46 @@ class RemoteService extends ChangeNotifier {
       default:
         break;
     }
+  }
+
+  // Poll the relay for LAN-mates every few seconds while we're registered.
+  void _startServerDiscovery() {
+    _discoverTimer?.cancel();
+    _hostSignaling?.sendDiscover();
+    _discoverTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+      final s = _hostSignaling;
+      if (s == null) {
+        _discoverTimer?.cancel();
+        _discoverTimer = null;
+        return;
+      }
+      s.sendDiscover();
+    });
+  }
+
+  void _onServerPeers(dynamic payload) {
+    if (payload is! Map) return;
+    final list = payload['peers'];
+    if (list is! List) return;
+    final now = DateTime.now();
+    final seen = <String>{};
+    for (final p in list) {
+      if (p is! Map) continue;
+      final id = (p['id'] as String?)?.trim() ?? '';
+      if (id.isEmpty || id == _agentId) continue;
+      seen.add(id);
+      final name = (p['hostname'] as String?)?.trim();
+      _serverPeers[id] = DiscoveredDevice(
+        id: id,
+        name: (name == null || name.isEmpty) ? id : name,
+        os: (p['os'] as String?) ?? '',
+        ip: '',
+        lastSeen: now,
+      );
+    }
+    // Drop machines the relay no longer lists (went offline / left the network).
+    _serverPeers.removeWhere((id, _) => !seen.contains(id));
+    notifyListeners();
   }
 
   Future<void> _startHostOffer(String controllerId) async {
