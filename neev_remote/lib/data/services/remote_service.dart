@@ -107,10 +107,23 @@ class RemoteService extends ChangeNotifier {
     store: FileStore(),
     onChange: notifyListeners,
     onRequest: _onFileRequest,
+    onClipboardFile: _onClipboardFileReceived,
   );
 
-  /// Active + recent file transfers (for the session UI).
-  List<FileTransfer> get fileTransfers => _files.transfers;
+  /// Active + recent file transfers (for the session UI). Clipboard mirrors are
+  /// hidden — they're background copy/paste, not user-visible transfers.
+  List<FileTransfer> get fileTransfers =>
+      _files.transfers.where((t) => !t.clipboard).toList();
+
+  // A clipboard file finished arriving: put it on THIS machine's clipboard so
+  // Ctrl+V pastes the real file. Suppress our own poller so we don't echo it.
+  Future<void> _onClipboardFileReceived(String path) async {
+    try {
+      _clipFileSuppress = 3;
+      _lastClipFiles = [path];
+      await Pasteboard.writeFiles([path]);
+    } catch (_) {}
+  }
 
   /// Export: send a picked file to the connected peer (viewer→host or
   /// host→viewers).
@@ -222,13 +235,9 @@ class RemoteService extends ChangeNotifier {
   int _clipImgNext = 0;
   int _clipImgTotal = 0;
   // Clipboard FILE sync: copying a file mirrors it to the peer's CLIPBOARD (via
-  // a temp file), so Ctrl+V on the other machine pastes the actual file.
-  final FileStore _clipStore = FileStore();
+  // a temp file over the reliable file channel), so Ctrl+V on the other machine
+  // pastes the actual file.
   List<String> _lastClipFiles = const [];
-  final StringBuffer _clipFileBuf = StringBuffer();
-  int _clipFileNext = 0;
-  int _clipFileTotal = 0;
-  String _clipFileName = '';
   int _clipFileSuppress = 0; // ticks to skip re-sending a just-received file
 
   // ---- Host dead-man's switch: release stuck buttons if input goes silent
@@ -793,10 +802,6 @@ class RemoteService extends ChangeNotifier {
     } catch (_) {}
     if (m == null) return;
 
-    if (m['k'] == 'clipfile') {
-      await _recvClipFile(m);
-      return;
-    }
     if (m['k'] == 'clip') {
       if (m['img'] == 1) {
         _recvClipImage(m);
@@ -1232,69 +1237,15 @@ class RemoteService extends ChangeNotifier {
     for (final p in paths) {
       try {
         final bytes = await XFile(p).readAsBytes();
-        if (bytes.length > _clipFileMaxBytes) continue; // too big for clipboard
+        if (bytes.length > _clipFileMaxBytes) continue; // too big to mirror
         final name = p.split(RegExp(r'[\\/]')).last;
         if (name.isEmpty) continue;
-        _broadcastClipFile(name, bytes);
+        // Reuse the reliable, flow-controlled file channel (not the control
+        // channel) so large copies don't overrun the send buffer or stall input.
+        await _files.sendFile(name, bytes, clipboard: true);
       } catch (_) {
         // Directory / unreadable — skip (folder copy isn't supported).
       }
-    }
-  }
-
-  void _broadcastClipFile(String name, Uint8List bytes) {
-    final b64 = base64Encode(bytes);
-    const chunk = 48 * 1024;
-    final total = (b64.length / chunk).ceil().clamp(1, 1 << 20);
-    for (var i = 0; i < total; i++) {
-      final start = i * chunk;
-      final end = start + chunk < b64.length ? start + chunk : b64.length;
-      final msg = jsonEncode({
-        'k': 'clipfile',
-        'name': name,
-        'i': i,
-        'n': total,
-        'd': b64.substring(start, end),
-      });
-      for (final peer in _hostPeers.values) {
-        peer.sendData(msg);
-      }
-      _viewerPeer?.sendData(msg);
-    }
-  }
-
-  Future<void> _recvClipFile(Map<String, dynamic> m) async {
-    final i = m['i'] as int?;
-    final n = m['n'] as int?;
-    final d = m['d'] as String?;
-    if (i == null || n == null || d == null) return;
-    if (i == 0) {
-      _clipFileBuf.clear();
-      _clipFileNext = 0;
-      _clipFileTotal = n;
-      _clipFileName = (m['name'] as String?) ?? 'file';
-    }
-    if (i == _clipFileNext && n == _clipFileTotal) {
-      _clipFileBuf.write(d);
-      _clipFileNext++;
-      if (_clipFileNext == _clipFileTotal) {
-        try {
-          final bytes = base64Decode(_clipFileBuf.toString());
-          final path = await _clipStore.saveToTemp(_clipFileName, bytes);
-          if (path != null) {
-            // Put the staged file on THIS machine's clipboard, so Ctrl+V pastes
-            // it. Suppress our own poller briefly so we don't echo it back.
-            _clipFileSuppress = 3;
-            _lastClipFiles = [path];
-            await Pasteboard.writeFiles([path]);
-          }
-        } catch (_) {}
-        _clipFileBuf.clear();
-        _clipFileNext = 0;
-      }
-    } else {
-      _clipFileBuf.clear();
-      _clipFileNext = 0;
     }
   }
 

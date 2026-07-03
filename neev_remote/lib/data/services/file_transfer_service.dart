@@ -20,6 +20,7 @@ class FileTransfer {
     this.status = FileStatus.active,
     this.savedPath,
     this.error,
+    this.clipboard = false,
   });
 
   final String id;
@@ -30,6 +31,9 @@ class FileTransfer {
   FileStatus status;
   String? savedPath; // where an incoming file landed
   String? error;
+  // True when this transfer is a clipboard mirror (copy→paste): the receiver
+  // stages it to temp and puts it on the OS clipboard instead of Downloads.
+  bool clipboard;
 
   double get progress =>
       size > 0 ? (transferred / size).clamp(0.0, 1.0).toDouble() : 0.0;
@@ -55,6 +59,7 @@ class FileTransferManager {
     required this.store,
     required this.onChange,
     this.onRequest,
+    this.onClipboardFile,
   });
 
   /// Sends one JSON message on the peer's file channel.
@@ -69,6 +74,10 @@ class FileTransferManager {
   /// Called when the peer asks us to share a file (their "Import") — should open
   /// a picker and send the chosen file back.
   final Future<void> Function()? onRequest;
+
+  /// Called when a *clipboard* file finishes arriving, with the staged temp
+  /// path — the owner puts it on the OS clipboard so Ctrl+V pastes the file.
+  final Future<void> Function(String stagedPath)? onClipboardFile;
 
   /// Raw bytes per 'data' message; base64 inflates 36 KB → 48 KB, well under
   /// the ~256 KB channel limit.
@@ -86,19 +95,27 @@ class FileTransferManager {
 
   /// Send [bytes] as [name] to the peer. Returns the transfer, or null if the
   /// file is too large.
-  Future<FileTransfer?> sendFile(String name, Uint8List bytes) async {
+  Future<FileTransfer?> sendFile(String name, Uint8List bytes,
+      {bool clipboard = false}) async {
     if (bytes.length > maxFile) return null;
     final id = _uuid.v4();
     final t = FileTransfer(
         id: id,
         name: name,
         size: bytes.length,
-        direction: FileDirection.outgoing);
+        direction: FileDirection.outgoing,
+        clipboard: clipboard);
     transfers.insert(0, t);
     onChange();
 
-    send(jsonEncode(
-        {'k': 'ft', 't': 'offer', 'id': id, 'name': name, 'size': bytes.length}));
+    send(jsonEncode({
+      'k': 'ft',
+      't': 'offer',
+      'id': id,
+      'name': name,
+      'size': bytes.length,
+      if (clipboard) 'clip': 1,
+    }));
 
     var seq = 0;
     for (var off = 0; off < bytes.length; off += rawChunk) {
@@ -141,7 +158,11 @@ class FileTransferManager {
         final name = (m['name'] as String?) ?? 'file';
         final size = (m['size'] as int?) ?? 0;
         final ft = FileTransfer(
-            id: id, name: name, size: size, direction: FileDirection.incoming);
+            id: id,
+            name: name,
+            size: size,
+            direction: FileDirection.incoming,
+            clipboard: m['clip'] == 1);
         if (size > maxFile) {
           ft.status = FileStatus.error;
           ft.error = 'File exceeds the ${maxFile ~/ (1024 * 1024)} MB limit';
@@ -180,7 +201,13 @@ class FileTransferManager {
   Future<void> _finishIncoming(_Incoming inc) async {
     try {
       final bytes = inc.buf.takeBytes();
-      if (store.supported) {
+      if (inc.ft.clipboard) {
+        // Clipboard mirror: stage to temp and hand the path to the owner to
+        // place on the OS clipboard (no Downloads clutter, no transfer row noise).
+        final path = await store.saveToTemp(inc.ft.name, bytes);
+        inc.ft.savedPath = path;
+        if (path != null) await onClipboardFile?.call(path);
+      } else if (store.supported) {
         inc.ft.savedPath = await store.saveToDownloads(inc.ft.name, bytes);
       }
       inc.ft.transferred = inc.ft.size == 0 ? bytes.length : inc.ft.size;

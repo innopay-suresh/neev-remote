@@ -66,6 +66,7 @@ class _ConnectPageState extends ConsumerState<ConnectPage> {
 
   @override
   void dispose() {
+    _dismissChatToast();
     _idController.dispose();
     _passwordController.dispose();
     super.dispose();
@@ -204,53 +205,40 @@ class _ConnectPageState extends ConsumerState<ConnectPage> {
         );
   }
 
-  // Toast for an incoming chat message; tapping "Open" jumps to the chat.
+  // A small toast anchored top-right (like a native notification), not a
+  // full-width bar. Auto-dismisses; tap to open the chat.
+  OverlayEntry? _chatToast;
+  Timer? _chatToastTimer;
+
   void _notifyChat(String text) {
-    final messenger = ScaffoldMessenger.maybeOf(context);
-    if (messenger == null) return;
-    final preview = text.length > 80 ? '${text.substring(0, 80)}…' : text;
-    messenger.clearSnackBars();
-    messenger.showSnackBar(
-      SnackBar(
-        behavior: SnackBarBehavior.floating,
-        backgroundColor: const Color(0xFF1D1D1F),
-        duration: const Duration(seconds: 5),
-        margin: const EdgeInsets.all(16),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(12),
-        ),
-        content: Row(
-          children: [
-            const Icon(Icons.chat_bubble_rounded,
-                color: AppColors.primary, size: 18),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text('New message',
-                      style: TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w600,
-                          fontSize: 13)),
-                  Text(preview,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                          color: Color(0xFFCFCFCF), fontSize: 12)),
-                ],
-              ),
-            ),
-          ],
-        ),
-        action: SnackBarAction(
-          label: 'Open',
-          textColor: AppColors.primary,
-          onPressed: _openChatFromNotification,
+    final overlay = Overlay.maybeOf(context);
+    if (overlay == null) return;
+    _dismissChatToast();
+    final preview = text.length > 90 ? '${text.substring(0, 90)}…' : text;
+    final entry = OverlayEntry(
+      builder: (ctx) => Positioned(
+        top: 16,
+        right: 16,
+        child: _ChatToast(
+          preview: preview,
+          onOpen: () {
+            _dismissChatToast();
+            _openChatFromNotification();
+          },
+          onClose: _dismissChatToast,
         ),
       ),
     );
+    _chatToast = entry;
+    overlay.insert(entry);
+    _chatToastTimer = Timer(const Duration(seconds: 5), _dismissChatToast);
+  }
+
+  void _dismissChatToast() {
+    _chatToastTimer?.cancel();
+    _chatToastTimer = null;
+    _chatToast?.remove();
+    _chatToast = null;
   }
 
   void _openChatFromNotification() {
@@ -301,6 +289,95 @@ final _typingLockProvider = StateProvider<bool>((_) => false);
 
 /// Remote video view mode: false = fit (letterbox), true = fill (cover).
 final _fillModeProvider = StateProvider<bool>((_) => false);
+
+/// Compact incoming-chat pop-up (top-right corner). Small, native-notification
+/// styling — a fixed ~300px card, not a full-width bar.
+class _ChatToast extends StatelessWidget {
+  final String preview;
+  final VoidCallback onOpen;
+  final VoidCallback onClose;
+  const _ChatToast(
+      {required this.preview, required this.onOpen, required this.onClose});
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: Container(
+        width: 300,
+        padding: const EdgeInsets.fromLTRB(12, 10, 8, 10),
+        decoration: BoxDecoration(
+          color: const Color(0xFF1D1D1F),
+          borderRadius: BorderRadius.circular(12),
+          boxShadow: const [
+            BoxShadow(
+                color: Color(0x33000000), blurRadius: 20, offset: Offset(0, 8)),
+          ],
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              width: 30,
+              height: 30,
+              decoration: BoxDecoration(
+                color: AppColors.primary.withValues(alpha: 0.18),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Icon(Icons.chat_bubble_rounded,
+                  color: AppColors.primary, size: 16),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      const Expanded(
+                        child: Text('New message',
+                            style: TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.w600,
+                                fontSize: 12.5)),
+                      ),
+                      InkWell(
+                        onTap: onClose,
+                        borderRadius: BorderRadius.circular(6),
+                        child: const Padding(
+                          padding: EdgeInsets.all(2),
+                          child: Icon(Icons.close,
+                              color: Color(0xFF8A8A8E), size: 15),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 2),
+                  Text(preview,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                          color: Color(0xFFCFCFCF), fontSize: 12, height: 1.3)),
+                  const SizedBox(height: 8),
+                  InkWell(
+                    onTap: onOpen,
+                    borderRadius: BorderRadius.circular(6),
+                    child: const Text('Open chat',
+                        style: TextStyle(
+                            color: AppColors.primary,
+                            fontWeight: FontWeight.w600,
+                            fontSize: 12)),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
 
 // --- App shell: left icon sidebar ---------------------------------------
 
