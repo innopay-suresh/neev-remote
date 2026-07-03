@@ -1,4 +1,3 @@
-import 'package:desktop_drop/desktop_drop.dart';
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 
@@ -22,73 +21,6 @@ Future<void> pickAndSendFile(BuildContext context, RemoteService service) async 
   if (t == null && context.mounted) {
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('File is too large (200 MB max)')),
-    );
-  }
-}
-
-/// Wraps [child] so files dragged onto it are sent to the connected peer.
-class DropToSend extends StatefulWidget {
-  final RemoteService service;
-  final Widget child;
-  const DropToSend({super.key, required this.service, required this.child});
-
-  @override
-  State<DropToSend> createState() => _DropToSendState();
-}
-
-class _DropToSendState extends State<DropToSend> {
-  bool _hover = false;
-
-  @override
-  Widget build(BuildContext context) {
-    return DropTarget(
-      onDragEntered: (_) => setState(() => _hover = true),
-      onDragExited: (_) => setState(() => _hover = false),
-      onDragDone: (detail) async {
-        if (mounted) setState(() => _hover = false);
-        for (final f in detail.files) {
-          try {
-            final bytes = await f.readAsBytes();
-            final name = f.name.isNotEmpty
-                ? f.name
-                : f.path.split(RegExp(r'[\\/]')).last;
-            await widget.service.sendFile(name, bytes);
-          } catch (_) {}
-        }
-      },
-      child: Stack(
-        children: [
-          widget.child,
-          if (_hover)
-            Positioned.fill(
-              child: IgnorePointer(
-                child: Container(
-                  color: AppColors.primary.withValues(alpha: 0.14),
-                  alignment: Alignment.center,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 18, vertical: 12),
-                    decoration: BoxDecoration(
-                      color: AppColors.primary,
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: const Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.download, color: Colors.white, size: 20),
-                        SizedBox(width: 8),
-                        Text('Drop to send to the remote',
-                            style: TextStyle(
-                                color: Colors.white,
-                                fontWeight: FontWeight.w600)),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ),
-        ],
-      ),
     );
   }
 }

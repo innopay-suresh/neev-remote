@@ -26,17 +26,18 @@ const List<_Shortcut> _shortcuts = [
 /// sees them.
 class ShortcutsMenu extends StatelessWidget {
   final RemoteService service;
-  const ShortcutsMenu({super.key, required this.service});
+  final Color color;
+  const ShortcutsMenu(
+      {super.key, required this.service, this.color = const Color(0xFF5B5B60)});
 
   @override
   Widget build(BuildContext context) {
     return PopupMenuButton<List<int>>(
       tooltip: 'Send a keyboard shortcut to the remote PC',
-      icon: Icon(Icons.bolt_rounded,
-          size: 20, color: Colors.white.withValues(alpha: 0.72)),
-      iconSize: 20,
+      icon: Icon(Icons.bolt_rounded, size: 19, color: color),
+      iconSize: 19,
       padding: EdgeInsets.zero,
-      constraints: const BoxConstraints(minWidth: 40, minHeight: 36),
+      constraints: const BoxConstraints(minWidth: 38, minHeight: 40),
       position: PopupMenuPosition.under,
       onSelected: service.sendKeyCombo,
       itemBuilder: (_) => [

@@ -165,20 +165,13 @@ class _ConnectPageState extends ConsumerState<ConnectPage> {
       case 3: // Favorites
         return _RecentPage(onPick: _pickAndHome);
       case 0: // Home
-        final home = _HomeDashboard(
+        return _HomeDashboard(
           service: service,
           idController: _idController,
           passwordController: _passwordController,
           onConnect: _connect,
           onPick: _fillId,
         );
-        // While a viewer is connected, accept a file dropped anywhere on the
-        // host's home page (not just the small "This computer" card) and send
-        // it over. NOTE: a SYSTEM/unattended host can't receive drags from the
-        // logged-in user's Explorer (Windows UIPI blocks it) — copy/paste the
-        // file instead, which routes through the clipboard channel.
-        final hasViewer = service.connectedViewers > 0;
-        return hasViewer ? DropToSend(service: service, child: home) : home;
       default: // Contacts — coming soon
         return _ComingSoon(item: _navItems[_section]);
     }
@@ -1482,8 +1475,7 @@ class _ThisComputerCard extends ConsumerWidget {
         ],
       ),
     );
-    // While sharing, let the host drag files onto the card to send them.
-    return online ? DropToSend(service: service, child: card) : card;
+    return card;
   }
 }
 
@@ -1741,70 +1733,64 @@ class _ConnectedSession extends ConsumerWidget {
         ref.watch(settingsProvider).viewOnly || service.viewerViewOnly;
     return Scaffold(
       backgroundColor: const Color(0xFF0B0F1A),
-      body: DropToSend(
-        service: service,
-        child: Stack(
-          children: [
-            Positioned.fill(
-              child: RemoteViewWidget(
-                isConnected: true,
-                remoteStream: service.remoteStream,
-                viewOnly: viewOnly,
-                hostOs: service.remoteHostOs,
-                onInput: viewOnly
-                    ? null
-                    : (event) =>
-                        ref.read(remoteServiceProvider).sendViewerInput(event),
-                uacActive: service.uacActive,
-                uacFrame: service.uacFrame,
-                uacW: service.uacW,
-                uacH: service.uacH,
-                uacKind: service.uacKind,
-                fillMode: ref.watch(_fillModeProvider),
-                inputPaused: ref.watch(_chatOpenProvider) ||
-                    ref.watch(_typingLockProvider),
-                onUacClick: (b, x, y) =>
-                    ref.read(remoteServiceProvider).sendUacClick(b, x, y),
-                onUacApprove: () =>
-                    ref.read(remoteServiceProvider).sendUacApprove(),
-                onUacDecline: () =>
-                    ref.read(remoteServiceProvider).sendUacDecline(),
-              ),
-            ),
-            Positioned(
-              right: AppSpacing.lg,
-              bottom: AppSpacing.lg,
-              child: FileTransferList(service: service),
-            ),
-            if (ref.watch(_chatOpenProvider))
-              Positioned(
-                right: AppSpacing.lg,
-                top: 74,
-                bottom: AppSpacing.lg,
-                child: _ChatPanel(
-                  service: service,
-                  onClose: () {
-                    ref.read(_chatOpenProvider.notifier).state = false;
-                    service.pauseKeyboardCapture(false);
-                  },
+      // Slim persistent header (AnyDesk-style) above the remote view. Because
+      // it's a layout row — not an overlay — it never covers the remote's own
+      // taskbar, and the video fills everything below it.
+      body: Column(
+        children: [
+          _SessionToolbar(service: service),
+          Expanded(
+            child: Stack(
+              children: [
+                Positioned.fill(
+                  child: RemoteViewWidget(
+                    isConnected: true,
+                    remoteStream: service.remoteStream,
+                    viewOnly: viewOnly,
+                    hostOs: service.remoteHostOs,
+                    onInput: viewOnly
+                        ? null
+                        : (event) => ref
+                            .read(remoteServiceProvider)
+                            .sendViewerInput(event),
+                    uacActive: service.uacActive,
+                    uacFrame: service.uacFrame,
+                    uacW: service.uacW,
+                    uacH: service.uacH,
+                    uacKind: service.uacKind,
+                    fillMode: ref.watch(_fillModeProvider),
+                    inputPaused: ref.watch(_chatOpenProvider) ||
+                        ref.watch(_typingLockProvider),
+                    onUacClick: (b, x, y) =>
+                        ref.read(remoteServiceProvider).sendUacClick(b, x, y),
+                    onUacApprove: () =>
+                        ref.read(remoteServiceProvider).sendUacApprove(),
+                    onUacDecline: () =>
+                        ref.read(remoteServiceProvider).sendUacDecline(),
+                  ),
                 ),
-              ),
-            // Auto-hide command bar along the TOP — reveals on hover so it never
-            // covers the remote's own taskbar at the bottom of the screen.
-            Positioned(
-              top: 0,
-              left: 0,
-              right: 0,
-              child: _AutoHideBar(
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: AppSpacing.lg),
-                  child: _SessionToolbar(service: service),
+                Positioned(
+                  right: AppSpacing.lg,
+                  bottom: AppSpacing.lg,
+                  child: FileTransferList(service: service),
                 ),
-              ),
+                if (ref.watch(_chatOpenProvider))
+                  Positioned(
+                    right: AppSpacing.lg,
+                    top: AppSpacing.lg,
+                    bottom: AppSpacing.lg,
+                    child: _ChatPanel(
+                      service: service,
+                      onClose: () {
+                        ref.read(_chatOpenProvider.notifier).state = false;
+                        service.pauseKeyboardCapture(false);
+                      },
+                    ),
+                  ),
+              ],
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
@@ -1971,75 +1957,6 @@ class _ChatBubble extends StatelessWidget {
   }
 }
 
-/// Reveals [child] (the command bar) when the pointer is near the top of the
-/// screen, then auto-hides it — so the bar never permanently covers the remote
-/// desktop (its taskbar, menus, etc.).
-class _AutoHideBar extends StatefulWidget {
-  final Widget child;
-  const _AutoHideBar({required this.child});
-  @override
-  State<_AutoHideBar> createState() => _AutoHideBarState();
-}
-
-class _AutoHideBarState extends State<_AutoHideBar> {
-  bool _show = true;
-  Timer? _hideTimer;
-
-  @override
-  void initState() {
-    super.initState();
-    _scheduleHide();
-  }
-
-  void _scheduleHide() {
-    _hideTimer?.cancel();
-    _hideTimer = Timer(const Duration(seconds: 3), () {
-      if (mounted) setState(() => _show = false);
-    });
-  }
-
-  void _reveal() {
-    if (!_show) setState(() => _show = true);
-    _scheduleHide();
-  }
-
-  @override
-  void dispose() {
-    _hideTimer?.cancel();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      height: 76,
-      child: Stack(
-        children: [
-          // Full-zone hover catcher (transparent to clicks) — reveals the bar
-          // when the pointer nears the top, even after it has hidden.
-          Positioned.fill(
-            child: MouseRegion(
-              opaque: false,
-              onEnter: (_) => _reveal(),
-              onHover: (_) => _reveal(),
-              child: const SizedBox.expand(),
-            ),
-          ),
-          AnimatedSlide(
-            duration: const Duration(milliseconds: 200),
-            curve: Curves.easeOut,
-            offset: _show ? Offset.zero : const Offset(0, -1.4),
-            child: Padding(
-              padding: const EdgeInsets.only(top: AppSpacing.md),
-              child: widget.child,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
 /// Premium in-session control bar: a status/stats cluster on the left and
 /// clearly-labeled, grouped controls on the right so every action is trackable
 /// (the old bar was icon-only and ambiguous).
@@ -2053,36 +1970,27 @@ class _SessionToolbar extends ConsumerWidget {
     final win = service.remoteHostOs == 'windows';
 
     return Container(
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(AppRadius.xl),
-        boxShadow: AppShadows.float,
+      height: 48,
+      decoration: const BoxDecoration(
+        color: Color(0xFFF7F7F8),
+        border: Border(
+            bottom: BorderSide(color: Color(0xFFE3E3E6), width: 1)),
       ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(AppRadius.xl),
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
-          child: Container(
-            decoration: BoxDecoration(
-              color: const Color(0xFF181818).withValues(alpha: 0.86),
-              borderRadius: BorderRadius.circular(AppRadius.xl),
-              border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
-            ),
-            padding: const EdgeInsets.symmetric(
-                horizontal: AppSpacing.md, vertical: AppSpacing.xs),
-            child: Row(
-              mainAxisSize: MainAxisSize.max,
-              children: [
-                _ConnectionBadge(id: service.targetId ?? '—'),
-                const SizedBox(width: AppSpacing.sm),
-                _StatsStrip(stats: stats),
-                const _ToolDivider(),
-                Expanded(
-                  child: SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    reverse: true,
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
+      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+      child: Row(
+        mainAxisSize: MainAxisSize.max,
+        children: [
+          _ConnectionBadge(id: service.targetId ?? '—'),
+          const SizedBox(width: AppSpacing.md),
+          _StatsStrip(stats: stats),
+          const Spacer(),
+          Flexible(
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              reverse: true,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
                 // --- Control group ---
                 _ToolButton(
                   icon: service.viewerViewOnly
@@ -2190,19 +2098,16 @@ class _SessionToolbar extends ConsumerWidget {
                   tooltip: 'Restart the remote PC',
                   onPressed: () => _confirmRestart(context, service),
                 ),
-                      ],
-                    ),
-                  ),
-                ),
-                const SizedBox(width: AppSpacing.sm),
-                _DisconnectButton(
-                  onPressed: () =>
-                      ref.read(remoteServiceProvider).disconnectViewer(),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
-        ),
+          const SizedBox(width: AppSpacing.sm),
+          _DisconnectButton(
+            onPressed: () =>
+                ref.read(remoteServiceProvider).disconnectViewer(),
+          ),
+        ],
       ),
     );
   }
@@ -2332,30 +2237,25 @@ class _ConnectionBadge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      decoration: BoxDecoration(
-        color: AppColors.success.withValues(alpha: 0.10),
-        borderRadius: BorderRadius.circular(AppRadius.pill),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 8,
-            height: 8,
-            decoration: const BoxDecoration(
-                color: AppColors.success, shape: BoxShape.circle),
-          ),
-          const SizedBox(width: 8),
-          Text('Connected', style: AppTypography.label.copyWith(
-              color: AppColors.success, fontWeight: FontWeight.w600)),
-          const SizedBox(width: 6),
-          Text(id, style: AppTypography.caption.copyWith(
-              fontFeatures: const [FontFeature.tabularFigures()],
-              color: Colors.white.withValues(alpha: 0.92))),
-        ],
-      ),
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 9,
+          height: 9,
+          decoration: const BoxDecoration(
+              color: AppColors.success, shape: BoxShape.circle),
+        ),
+        const SizedBox(width: 8),
+        Text(id,
+            style: const TextStyle(
+              color: Color(0xFF1D1D1F),
+              fontWeight: FontWeight.w700,
+              fontSize: 14,
+              letterSpacing: 0.2,
+              fontFeatures: [FontFeature.tabularFigures()],
+            )),
+      ],
     );
   }
 }
@@ -2369,31 +2269,25 @@ class _StatsStrip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     Widget item(IconData ic, String v) => Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 6),
+          padding: const EdgeInsets.symmetric(horizontal: 5),
           child: Row(mainAxisSize: MainAxisSize.min, children: [
-            Icon(ic, size: 13, color: Colors.white.withValues(alpha: 0.45)),
+            Icon(ic, size: 13, color: const Color(0xFFA0A0A5)),
             const SizedBox(width: 4),
             Text(v,
-                style: AppTypography.caption.copyWith(
-                    color: Colors.white.withValues(alpha: 0.75),
-                    fontFeatures: const [FontFeature.tabularFigures()])),
+                style: const TextStyle(
+                    color: Color(0xFF6B6B70),
+                    fontSize: 12,
+                    fontFeatures: [FontFeature.tabularFigures()])),
           ]),
         );
     return Tooltip(
       message:
           'Codec ${stats.codec ?? '—'} · ${stats.framesDecoded ?? 0} frames decoded',
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
-        decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: 0.08),
-          borderRadius: BorderRadius.circular(AppRadius.sm),
-        ),
-        child: Row(mainAxisSize: MainAxisSize.min, children: [
-          item(Icons.speed, '${stats.fps ?? 0} fps'),
-          item(Icons.network_ping, '${stats.latencyMs ?? 0} ms'),
-          item(Icons.bar_chart, '${stats.bitrateKbps ?? 0} kbps'),
-        ]),
-      ),
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        item(Icons.speed, '${stats.fps ?? 0} fps'),
+        item(Icons.network_ping, '${stats.latencyMs ?? 0} ms'),
+        item(Icons.bar_chart, '${stats.bitrateKbps ?? 0} kbps'),
+      ]),
     );
   }
 }
@@ -2425,11 +2319,9 @@ class _ToolButtonState extends State<_ToolButton> {
   Widget build(BuildContext context) {
     final active = widget.active;
     final fg = active
-        ? AppColors.primaryHover
-        : Colors.white.withValues(alpha: _hover ? 0.95 : 0.72);
-    final bg = active
-        ? AppColors.primary.withValues(alpha: 0.22)
-        : (_hover ? Colors.white.withValues(alpha: 0.10) : Colors.transparent);
+        ? AppColors.primary
+        : (_hover ? const Color(0xFF1D1D1F) : const Color(0xFF5B5B60));
+    final bg = _hover ? const Color(0xFFEAEAEC) : Colors.transparent;
     return Tooltip(
       message: widget.tooltip,
       waitDuration: const Duration(milliseconds: 400),
@@ -2439,18 +2331,39 @@ class _ToolButtonState extends State<_ToolButton> {
         cursor: SystemMouseCursors.click,
         child: GestureDetector(
           onTap: widget.onPressed,
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 120),
-            width: 40,
-            height: 36,
-            margin: const EdgeInsets.symmetric(horizontal: 2),
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              color: bg,
-              borderRadius: BorderRadius.circular(AppRadius.sm),
+          child: SizedBox(
+            width: 38,
+            height: 40,
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                AnimatedContainer(
+                  duration: const Duration(milliseconds: 120),
+                  width: 34,
+                  height: 30,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: bg,
+                    borderRadius: BorderRadius.circular(AppRadius.sm),
+                  ),
+                  child: Icon(widget.icon,
+                      size: 19, color: fg, semanticLabel: widget.label),
+                ),
+                // AnyDesk-style active underline.
+                if (active)
+                  Positioned(
+                    bottom: 1,
+                    child: Container(
+                      width: 20,
+                      height: 2.5,
+                      decoration: BoxDecoration(
+                        color: AppColors.primary,
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                  ),
+              ],
             ),
-            child: Icon(widget.icon,
-                size: 20, color: fg, semanticLabel: widget.label),
           ),
         ),
       ),
@@ -2481,14 +2394,12 @@ class _MonitorButton extends StatelessWidget {
             ),
           ),
       ],
-      child: Container(
-        width: 40,
-        height: 36,
-        margin: const EdgeInsets.symmetric(horizontal: 2),
-        alignment: Alignment.center,
+      child: const SizedBox(
+        width: 38,
+        height: 40,
         child: Icon(Icons.monitor,
-            size: 20,
-            color: Colors.white.withValues(alpha: 0.72),
+            size: 19,
+            color: Color(0xFF5B5B60),
             semanticLabel: 'Switch monitor'),
       ),
     );
@@ -2500,28 +2411,37 @@ class _ToolDivider extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Container(
         width: 1,
-        height: 30,
-        margin: const EdgeInsets.symmetric(horizontal: AppSpacing.sm),
-        color: Colors.white.withValues(alpha: 0.12),
+        height: 22,
+        margin: const EdgeInsets.symmetric(horizontal: AppSpacing.xs),
+        color: const Color(0xFFDDDDE0),
       );
 }
 
-/// Prominent red pill for the one destructive action.
+/// Compact red pill for the one destructive action — sized for the slim bar.
 class _DisconnectButton extends StatelessWidget {
   final VoidCallback onPressed;
   const _DisconnectButton({required this.onPressed});
 
   @override
   Widget build(BuildContext context) {
-    return FilledButton.icon(
-      onPressed: onPressed,
-      icon: const Icon(Icons.call_end_rounded, size: 18),
-      label: const Text('Disconnect'),
-      style: FilledButton.styleFrom(
-        backgroundColor: AppColors.error,
-        foregroundColor: Colors.white,
-        padding:
-            const EdgeInsets.symmetric(horizontal: AppSpacing.lg, vertical: 12),
+    return Padding(
+      padding: const EdgeInsets.only(left: AppSpacing.xs),
+      child: SizedBox(
+        height: 32,
+        child: FilledButton.icon(
+          onPressed: onPressed,
+          icon: const Icon(Icons.call_end_rounded, size: 16),
+          label: const Text('End'),
+          style: FilledButton.styleFrom(
+            backgroundColor: AppColors.error,
+            foregroundColor: Colors.white,
+            textStyle:
+                const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            minimumSize: const Size(0, 32),
+            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          ),
+        ),
       ),
     );
   }

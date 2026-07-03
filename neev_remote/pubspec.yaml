@@ -26,9 +26,6 @@ dependencies:
   # Clipboard images (native, no Rust toolchain — unlike super_clipboard)
   pasteboard: ^0.2.0
 
-  # Drag-and-drop files onto the window to send them
-  desktop_drop: ^0.4.4
-
   # State Management
   flutter_riverpod: ^2.6.1
   riverpod_annotation: ^2.6.1
