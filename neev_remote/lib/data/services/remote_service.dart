@@ -221,6 +221,15 @@ class RemoteService extends ChangeNotifier {
   final StringBuffer _clipImgBuf = StringBuffer();
   int _clipImgNext = 0;
   int _clipImgTotal = 0;
+  // Clipboard FILE sync: copying a file mirrors it to the peer's CLIPBOARD (via
+  // a temp file), so Ctrl+V on the other machine pastes the actual file.
+  final FileStore _clipStore = FileStore();
+  List<String> _lastClipFiles = const [];
+  final StringBuffer _clipFileBuf = StringBuffer();
+  int _clipFileNext = 0;
+  int _clipFileTotal = 0;
+  String _clipFileName = '';
+  int _clipFileSuppress = 0; // ticks to skip re-sending a just-received file
 
   // ---- Host dead-man's switch: release stuck buttons if input goes silent
   // (viewer minimized / frozen / disconnected) so the host mouse never freezes.
@@ -784,6 +793,10 @@ class RemoteService extends ChangeNotifier {
     } catch (_) {}
     if (m == null) return;
 
+    if (m['k'] == 'clipfile') {
+      await _recvClipFile(m);
+      return;
+    }
     if (m['k'] == 'clip') {
       if (m['img'] == 1) {
         _recvClipImage(m);
@@ -1100,9 +1113,7 @@ class RemoteService extends ChangeNotifier {
       await _pollClipText();
       _clipTick++;
       if (_clipTick.isEven) await _pollClipImage(); // images ~every 1.2s
-      // NOTE: automatic clipboard-FILE transfer is intentionally disabled — it
-      // surprised users (copying a file silently sent it to the other machine).
-      // Files transfer only on explicit drag-drop or Export/Import.
+      if (_clipTick % 3 == 0) await _pollClipFiles(); // files ~every 1.8s
     });
   }
 
@@ -1185,6 +1196,105 @@ class RemoteService extends ChangeNotifier {
     } else {
       _clipImgBuf.clear();
       _clipImgNext = 0;
+    }
+  }
+
+  // Detect files freshly copied to the local clipboard and mirror them to the
+  // peer's clipboard. Small files only (chunked base64 over the data channel).
+  static const int _clipFileMaxBytes = 64 * 1024 * 1024; // 64 MB cap
+  Future<void> _pollClipFiles() async {
+    if (_clipFileSuppress > 0) {
+      _clipFileSuppress--;
+      return;
+    }
+    List<String> paths;
+    try {
+      paths = await Pasteboard.files();
+    } catch (_) {
+      return;
+    }
+    if (paths.isEmpty) {
+      _lastClipFiles = const [];
+      return;
+    }
+    // Only react to a *change* (a fresh Ctrl+C), never re-send the same set.
+    if (paths.length == _lastClipFiles.length) {
+      var same = true;
+      for (var i = 0; i < paths.length; i++) {
+        if (paths[i] != _lastClipFiles[i]) {
+          same = false;
+          break;
+        }
+      }
+      if (same) return;
+    }
+    _lastClipFiles = List.of(paths);
+    for (final p in paths) {
+      try {
+        final bytes = await XFile(p).readAsBytes();
+        if (bytes.length > _clipFileMaxBytes) continue; // too big for clipboard
+        final name = p.split(RegExp(r'[\\/]')).last;
+        if (name.isEmpty) continue;
+        _broadcastClipFile(name, bytes);
+      } catch (_) {
+        // Directory / unreadable — skip (folder copy isn't supported).
+      }
+    }
+  }
+
+  void _broadcastClipFile(String name, Uint8List bytes) {
+    final b64 = base64Encode(bytes);
+    const chunk = 48 * 1024;
+    final total = (b64.length / chunk).ceil().clamp(1, 1 << 20);
+    for (var i = 0; i < total; i++) {
+      final start = i * chunk;
+      final end = start + chunk < b64.length ? start + chunk : b64.length;
+      final msg = jsonEncode({
+        'k': 'clipfile',
+        'name': name,
+        'i': i,
+        'n': total,
+        'd': b64.substring(start, end),
+      });
+      for (final peer in _hostPeers.values) {
+        peer.sendData(msg);
+      }
+      _viewerPeer?.sendData(msg);
+    }
+  }
+
+  Future<void> _recvClipFile(Map<String, dynamic> m) async {
+    final i = m['i'] as int?;
+    final n = m['n'] as int?;
+    final d = m['d'] as String?;
+    if (i == null || n == null || d == null) return;
+    if (i == 0) {
+      _clipFileBuf.clear();
+      _clipFileNext = 0;
+      _clipFileTotal = n;
+      _clipFileName = (m['name'] as String?) ?? 'file';
+    }
+    if (i == _clipFileNext && n == _clipFileTotal) {
+      _clipFileBuf.write(d);
+      _clipFileNext++;
+      if (_clipFileNext == _clipFileTotal) {
+        try {
+          final bytes = base64Decode(_clipFileBuf.toString());
+          final path = await _clipStore.saveToTemp(_clipFileName, bytes);
+          if (path != null) {
+            // Put the staged file on THIS machine's clipboard, so Ctrl+V pastes
+            // it. Suppress our own poller briefly so we don't echo it back.
+            _clipFileSuppress = 3;
+            _lastClipFiles = [path];
+            await Pasteboard.writeFiles([path]);
+          }
+        } catch (_) {}
+        _clipFileBuf.clear();
+        _clipFileNext = 0;
+      }
+    } else {
+      _clipFileBuf.clear();
+      _clipFileNext = 0;
     }
   }
 

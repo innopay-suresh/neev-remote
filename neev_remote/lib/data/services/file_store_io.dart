@@ -49,4 +49,22 @@ class FileStore {
     await File(path).writeAsBytes(bytes, flush: true);
     return path;
   }
+
+  /// Writes [bytes] to a temp file (used for clipboard-file paste: the receiver
+  /// stages the file, then puts its path on the clipboard so Ctrl+V pastes it).
+  Future<String?> saveToTemp(String name, Uint8List bytes) async {
+    try {
+      final dir = Directory(
+          '${Directory.systemTemp.path}${Platform.pathSeparator}NeevRemote');
+      if (!await dir.exists()) await dir.create(recursive: true);
+      final safe =
+          name.replaceAll(RegExp(r'[\\/:*?"<>|\x00-\x1f]'), '_').trim();
+      final cleaned = safe.isEmpty ? 'file' : safe;
+      final path = '${dir.path}${Platform.pathSeparator}$cleaned';
+      await File(path).writeAsBytes(bytes, flush: true);
+      return path;
+    } catch (_) {
+      return null;
+    }
+  }
 }

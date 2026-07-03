@@ -30,6 +30,7 @@ class _ConnectPageState extends ConsumerState<ConnectPage> {
   final _passwordController = TextEditingController();
   bool _autoStarted = false;
   int _section = 0; // selected sidebar section
+  int _lastChatCount = 0; // for the incoming-chat notification
 
   @override
   void initState() {
@@ -79,6 +80,22 @@ class _ConnectPageState extends ConsumerState<ConnectPage> {
     // launch — otherwise two machines never see each other. No-op listener so
     // this doesn't rebuild the page on every device change.
     ref.listen(discoveryProvider, (_, __) {});
+
+    // Pop a toast when a chat message arrives while the chat panel is closed —
+    // works for both host (shell) and viewer (in-session), since this build
+    // runs before either branch returns.
+    ref.listen<RemoteService>(remoteServiceProvider, (prev, next) {
+      final msgs = next.chatMessages;
+      if (msgs.length > _lastChatCount) {
+        final last = msgs.last;
+        final chatOpen = ref.read(_chatOpenProvider);
+        final onChatTab = _section == 5;
+        if (!last.mine && !chatOpen && !onChatTab) {
+          _notifyChat(last.text);
+        }
+      }
+      _lastChatCount = msgs.length;
+    });
 
     // Active remote session takes the whole window.
     if (service.viewerStatus == ViewerStatus.connected) {
@@ -147,13 +164,20 @@ class _ConnectPageState extends ConsumerState<ConnectPage> {
       case 3: // Favorites
         return _RecentPage(onPick: _pickAndHome);
       case 0: // Home
-        return _HomeDashboard(
+        final home = _HomeDashboard(
           service: service,
           idController: _idController,
           passwordController: _passwordController,
           onConnect: _connect,
           onPick: _fillId,
         );
+        // While a viewer is connected, accept a file dropped anywhere on the
+        // host's home page (not just the small "This computer" card) and send
+        // it over. NOTE: a SYSTEM/unattended host can't receive drags from the
+        // logged-in user's Explorer (Windows UIPI blocks it) — copy/paste the
+        // file instead, which routes through the clipboard channel.
+        final hasViewer = service.connectedViewers > 0;
+        return hasViewer ? DropToSend(service: service, child: home) : home;
       default: // Contacts — coming soon
         return _ComingSoon(item: _navItems[_section]);
     }
@@ -178,6 +202,68 @@ class _ConnectPageState extends ConsumerState<ConnectPage> {
           targetId: id,
           password: _passwordController.text,
         );
+  }
+
+  // Toast for an incoming chat message; tapping "Open" jumps to the chat.
+  void _notifyChat(String text) {
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    if (messenger == null) return;
+    final preview = text.length > 80 ? '${text.substring(0, 80)}…' : text;
+    messenger.clearSnackBars();
+    messenger.showSnackBar(
+      SnackBar(
+        behavior: SnackBarBehavior.floating,
+        backgroundColor: const Color(0xFF1D1D1F),
+        duration: const Duration(seconds: 5),
+        margin: const EdgeInsets.all(16),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+        ),
+        content: Row(
+          children: [
+            const Icon(Icons.chat_bubble_rounded,
+                color: AppColors.primary, size: 18),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('New message',
+                      style: TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w600,
+                          fontSize: 13)),
+                  Text(preview,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                          color: Color(0xFFCFCFCF), fontSize: 12)),
+                ],
+              ),
+            ),
+          ],
+        ),
+        action: SnackBarAction(
+          label: 'Open',
+          textColor: AppColors.primary,
+          onPressed: _openChatFromNotification,
+        ),
+      ),
+    );
+  }
+
+  void _openChatFromNotification() {
+    final service = ref.read(remoteServiceProvider);
+    if (service.viewerStatus == ViewerStatus.connected) {
+      // Viewer is in a live session → open the in-session chat panel.
+      ref.read(_chatOpenProvider.notifier).state = true;
+      service.pauseKeyboardCapture(true);
+    } else {
+      // Host (or idle viewer) → jump to the Chat sidebar section.
+      setState(() => _section = 5);
+    }
+    service.markChatRead();
   }
 }
 

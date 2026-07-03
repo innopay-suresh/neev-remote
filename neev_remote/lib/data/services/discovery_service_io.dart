@@ -23,6 +23,8 @@ class DiscoveryService {
   final Map<String, DiscoveredDevice> _devices = {};
   List<InternetAddress> _broadcastTargets = [InternetAddress('255.255.255.255')];
   int _rescanTick = 0;
+  int _sentCount = 0; // announce packets we've broadcast
+  int _heardCount = 0; // neev packets we've received from OTHER machines
 
   /// Human-readable state for the UI (bind status / announcing).
   String status = 'Starting…';
@@ -108,7 +110,6 @@ class DiscoveryService {
       _setStatus('Waiting to go online (start sharing to be discoverable)…');
       return;
     }
-    _setStatus('Listening on your network…');
     // Refresh interface list occasionally (adapters change: VPN up/down, Wi-Fi).
     if (_rescanTick++ % 10 == 0) _refreshBroadcastTargets();
     final payload = utf8.encode(
@@ -116,8 +117,21 @@ class DiscoveryService {
     for (final t in _broadcastTargets) {
       try {
         s.send(payload, t, _port);
+        _sentCount++;
       } catch (_) {}
     }
+    _setStatus(_diag());
+  }
+
+  // A live one-line diagnostic so the user can confirm each machine is both
+  // broadcasting (sent) and receiving (heard). If two machines each show
+  // "sharing as <id>" and sent>0 but heard=0, the network is blocking UDP
+  // broadcast (AP client isolation / guest Wi-Fi / VLAN / firewall).
+  String _diag() {
+    final net = _broadcastTargets.length > 1
+        ? '${_broadcastTargets.length - 1} network(s)'
+        : 'this network';
+    return 'Sharing as $_id on $net · sent $_sentCount · heard $_heardCount';
   }
 
   void _onEvent(RawSocketEvent event) {
@@ -133,6 +147,7 @@ class DiscoveryService {
     if (m['neev'] != 1) return;
     final id = (m['id'] as String?)?.trim() ?? '';
     if (id.isEmpty || id == _id) return; // skip self / anonymous
+    _heardCount++;
     final existing = _devices[id];
     final wasNew = existing == null;
     _devices[id] = DiscoveredDevice(
