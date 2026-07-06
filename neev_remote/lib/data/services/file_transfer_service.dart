@@ -202,9 +202,14 @@ class FileTransferManager {
     try {
       final bytes = inc.buf.takeBytes();
       if (inc.ft.clipboard) {
-        // Clipboard mirror: stage to temp and hand the path to the owner to
-        // place on the OS clipboard (no Downloads clutter, no transfer row noise).
-        final path = await store.saveToTemp(inc.ft.name, bytes);
+        // Clipboard mirror: save to Downloads (ALWAYS visible + findable) AND
+        // put it on the OS clipboard for Ctrl+V. Downloads is the reliable
+        // fallback because CF_HDROP clipboard paste is fragile across the
+        // SYSTEM / cross-user boundary, whereas a saved file always lands.
+        String? path;
+        if (store.supported) {
+          path = await store.saveToDownloads(inc.ft.name, bytes);
+        }
         inc.ft.savedPath = path;
         if (path != null) await onClipboardFile?.call(path);
       } else if (store.supported) {

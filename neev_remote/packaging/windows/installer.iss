@@ -42,8 +42,9 @@ Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription:
 ; Multi-user / unattended access: the SYSTEM service launches + follows the host
 ; into whichever session is active (across user-switching / logoff) so the
 ; machine is reachable with its machine-wide id + password no matter which
-; account is active. Opt-in, off by default.
-Name: "allusersstart"; Description: "Keep reachable for every user (service-managed unattended access)"; GroupDescription: "Unattended access:"; Flags: unchecked
+; account is active. DEFAULT ON — without it the host stays stuck in the first
+; user's session and won't follow user-switching / logon of another account.
+Name: "allusersstart"; Description: "Keep reachable for every user (follow user-switching / lock screen)"; GroupDescription: "Unattended access:"
 
 [Files]
 ; Packages the entire release folder produced by `flutter build windows`.

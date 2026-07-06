@@ -117,10 +117,10 @@ class RemoteService extends ChangeNotifier {
     onClipboardFile: _onClipboardFileReceived,
   );
 
-  /// Active + recent file transfers (for the session UI). Clipboard mirrors are
-  /// hidden — they're background copy/paste, not user-visible transfers.
-  List<FileTransfer> get fileTransfers =>
-      _files.transfers.where((t) => !t.clipboard).toList();
+  /// Active + recent file transfers (for the session UI). Clipboard-copied
+  /// files ARE shown now — a visible confirmation that the copy went through
+  /// (and where it landed) is more reliable than silent CF_HDROP paste.
+  List<FileTransfer> get fileTransfers => _files.transfers;
 
   // A clipboard file finished arriving: put it on THIS machine's clipboard so
   // Ctrl+V pastes the real file. Suppress our own poller so we don't echo it.
