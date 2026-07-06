@@ -214,6 +214,11 @@ class RemoteService extends ChangeNotifier {
   bool permControl = true;
   bool permClipboard = true;
   bool permFiles = true;
+  // Defaults pushed from settings — pre-fill the consent dialog + used when
+  // accepting silently (unattended / never-ask).
+  bool defaultPermControl = true;
+  bool defaultPermClipboard = true;
+  bool defaultPermFiles = true;
 
   /// Host: accept the pending incoming connection with the chosen permissions.
   Future<void> acceptConnection(
@@ -428,11 +433,13 @@ class RemoteService extends ChangeNotifier {
         // Attended: ask the host user first (AnyDesk-style). Unattended access
         // (promptOnConnect=false) accepts immediately with full permissions.
         if (promptOnConnect) {
-          permControl = permClipboard = permFiles = true;
           _pendingConsent = ConsentRequest(controllerId);
           notifyListeners();
         } else {
-          permControl = permClipboard = permFiles = true;
+          // Silent accept (unattended / never-ask) uses the default permissions.
+          permControl = defaultPermControl;
+          permClipboard = defaultPermClipboard;
+          permFiles = defaultPermFiles;
           await _startHostOffer(controllerId);
         }
         break;
@@ -858,6 +865,44 @@ class RemoteService extends ChangeNotifier {
     _viewerPeer?.sendData(jsonEncode({'k': 'setmon', 'id': id}));
   }
 
+  // ---- Stream quality presets (viewer-selected → host encoder) -------------
+  // 0 = best quality, 1 = balanced, 2 = best performance.
+  int _streamQuality = 1;
+  int get streamQuality => _streamQuality;
+
+  /// Viewer: pick a quality preset; the host caps its encoder accordingly.
+  void setStreamQuality(int preset) {
+    _streamQuality = preset.clamp(0, 2);
+    notifyListeners();
+    _viewerPeer?.sendData(jsonEncode({'k': 'quality', 'p': _streamQuality}));
+  }
+
+  // Host: map the viewer's preset to encoder limits and apply to every viewer.
+  void _applyHostQuality(int preset) {
+    int kbps;
+    int fps;
+    double scale;
+    switch (preset) {
+      case 0: // best quality
+        kbps = 4000;
+        fps = 30;
+        scale = 1.0;
+        break;
+      case 2: // best performance
+        kbps = 600;
+        fps = 15;
+        scale = 1.5;
+        break;
+      default: // balanced
+        kbps = 1500;
+        fps = 25;
+        scale = 1.0;
+    }
+    for (final p in _hostPeers.values) {
+      p.applyQuality(maxBitrateKbps: kbps, maxFps: fps, scaleDown: scale);
+    }
+  }
+
   // Host: re-capture the chosen monitor and hot-swap the video track on every
   // connected viewer (no renegotiation).
   Future<void> _switchMonitor(String? id) async {
@@ -913,6 +958,8 @@ class RemoteService extends ChangeNotifier {
       _viewerStatus = ViewerStatus.connected;
       _startStatsTimer();
       _ensureClipboardSync();
+      // Ask the host to apply our chosen quality preset once streaming starts.
+      _viewerPeer?.sendData(jsonEncode({'k': 'quality', 'p': _streamQuality}));
       notifyListeners();
     };
     peer.onIceCandidate = (c) =>
@@ -1034,6 +1081,11 @@ class RemoteService extends ChangeNotifier {
     // Viewer asked to switch the streamed monitor (viewer -> host).
     if (m['k'] == 'setmon') {
       if (isHost) _switchMonitor(m['id'] as String?);
+      return;
+    }
+    // Viewer picked a quality preset (viewer -> host).
+    if (m['k'] == 'quality') {
+      if (isHost) _applyHostQuality((m['p'] as int?) ?? 1);
       return;
     }
     // In-session chat (either direction).

@@ -37,6 +37,56 @@ class SettingsPage extends ConsumerWidget {
 
               const SizedBox(height: AppSpacing.xl),
 
+              // Security — incoming access + default permissions (AnyDesk parity)
+              _buildSectionHeader('Security'),
+              _buildSettingsCard([
+                _buildToggle(
+                  label: 'Ask before allowing connections',
+                  subtitle:
+                      'Show an Accept / Dismiss prompt for incoming sessions',
+                  value: settings.askOnConnect,
+                  onChanged: (v) =>
+                      ref.read(settingsProvider.notifier).setAskOnConnect(v),
+                ),
+                const Divider(),
+                _buildToggle(
+                  label: 'Sound on incoming connection',
+                  subtitle: 'Play a sound when someone connects',
+                  value: settings.soundOnConnect,
+                  onChanged: (v) =>
+                      ref.read(settingsProvider.notifier).setSoundOnConnect(v),
+                ),
+                const Divider(),
+                _buildToggle(
+                  label: 'Allow control by default',
+                  subtitle: 'Let viewers use the keyboard and mouse',
+                  value: settings.defaultAllowControl,
+                  onChanged: (v) => ref
+                      .read(settingsProvider.notifier)
+                      .setDefaultPermission(control: v),
+                ),
+                const Divider(),
+                _buildToggle(
+                  label: 'Share clipboard by default',
+                  subtitle: 'Sync text, images and files',
+                  value: settings.defaultAllowClipboard,
+                  onChanged: (v) => ref
+                      .read(settingsProvider.notifier)
+                      .setDefaultPermission(clipboard: v),
+                ),
+                const Divider(),
+                _buildToggle(
+                  label: 'Allow file transfer by default',
+                  subtitle: 'Export / Import and clipboard files',
+                  value: settings.defaultAllowFiles,
+                  onChanged: (v) => ref
+                      .read(settingsProvider.notifier)
+                      .setDefaultPermission(files: v),
+                ),
+              ]),
+
+              const SizedBox(height: AppSpacing.xl),
+
               // Video Settings
               _buildSectionHeader('Video'),
               _buildSettingsCard([

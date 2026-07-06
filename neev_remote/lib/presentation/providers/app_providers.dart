@@ -105,6 +105,12 @@ class AppSettings {
   // together with startOnBoot, the host auto-starts sharing on launch so it can
   // be reached after a reboot with the same id + password.
   final String unattendedPassword;
+  // Security / incoming access (AnyDesk "Access" + "Permissions" parity):
+  final bool askOnConnect; // prompt before allowing an incoming connection
+  final bool soundOnConnect; // play a sound on an incoming connection
+  final bool defaultAllowControl; // default: let viewers control this device
+  final bool defaultAllowClipboard; // default: share the clipboard
+  final bool defaultAllowFiles; // default: allow file transfer
 
   const AppSettings({
     this.relayUrl = '',
@@ -114,6 +120,11 @@ class AppSettings {
     this.startOnBoot = false,
     this.viewOnly = false,
     this.unattendedPassword = '',
+    this.askOnConnect = true,
+    this.soundOnConnect = true,
+    this.defaultAllowControl = true,
+    this.defaultAllowClipboard = true,
+    this.defaultAllowFiles = true,
   });
 
   bool get unattendedEnabled => unattendedPassword.isNotEmpty;
@@ -126,6 +137,11 @@ class AppSettings {
     bool? startOnBoot,
     bool? viewOnly,
     String? unattendedPassword,
+    bool? askOnConnect,
+    bool? soundOnConnect,
+    bool? defaultAllowControl,
+    bool? defaultAllowClipboard,
+    bool? defaultAllowFiles,
   }) {
     return AppSettings(
       relayUrl: relayUrl ?? this.relayUrl,
@@ -135,6 +151,12 @@ class AppSettings {
       startOnBoot: startOnBoot ?? this.startOnBoot,
       viewOnly: viewOnly ?? this.viewOnly,
       unattendedPassword: unattendedPassword ?? this.unattendedPassword,
+      askOnConnect: askOnConnect ?? this.askOnConnect,
+      soundOnConnect: soundOnConnect ?? this.soundOnConnect,
+      defaultAllowControl: defaultAllowControl ?? this.defaultAllowControl,
+      defaultAllowClipboard:
+          defaultAllowClipboard ?? this.defaultAllowClipboard,
+      defaultAllowFiles: defaultAllowFiles ?? this.defaultAllowFiles,
     );
   }
 }
@@ -155,6 +177,11 @@ class SettingsNotifier extends StateNotifier<AppSettings> {
   static const _kViewOnly = 'viewOnly';
   static const _kUnattended = 'unattendedPassword';
   static const _kStartOnBoot = 'startOnBoot';
+  static const _kAsk = 'askOnConnect';
+  static const _kSound = 'soundOnConnect';
+  static const _kPermControl = 'defaultAllowControl';
+  static const _kPermClip = 'defaultAllowClipboard';
+  static const _kPermFiles = 'defaultAllowFiles';
 
   Future<void> _load() async {
     final prefs = await SharedPreferences.getInstance();
@@ -165,6 +192,11 @@ class SettingsNotifier extends StateNotifier<AppSettings> {
       viewOnly: prefs.getBool(_kViewOnly),
       unattendedPassword: prefs.getString(_kUnattended),
       startOnBoot: prefs.getBool(_kStartOnBoot),
+      askOnConnect: prefs.getBool(_kAsk),
+      soundOnConnect: prefs.getBool(_kSound),
+      defaultAllowControl: prefs.getBool(_kPermControl),
+      defaultAllowClipboard: prefs.getBool(_kPermClip),
+      defaultAllowFiles: prefs.getBool(_kPermFiles),
     );
   }
 
@@ -176,6 +208,30 @@ class SettingsNotifier extends StateNotifier<AppSettings> {
     await prefs.setBool(_kViewOnly, state.viewOnly);
     await prefs.setString(_kUnattended, state.unattendedPassword);
     await prefs.setBool(_kStartOnBoot, state.startOnBoot);
+    await prefs.setBool(_kAsk, state.askOnConnect);
+    await prefs.setBool(_kSound, state.soundOnConnect);
+    await prefs.setBool(_kPermControl, state.defaultAllowControl);
+    await prefs.setBool(_kPermClip, state.defaultAllowClipboard);
+    await prefs.setBool(_kPermFiles, state.defaultAllowFiles);
+  }
+
+  void setAskOnConnect(bool v) {
+    state = state.copyWith(askOnConnect: v);
+    _save();
+  }
+
+  void setSoundOnConnect(bool v) {
+    state = state.copyWith(soundOnConnect: v);
+    _save();
+  }
+
+  void setDefaultPermission({bool? control, bool? clipboard, bool? files}) {
+    state = state.copyWith(
+      defaultAllowControl: control,
+      defaultAllowClipboard: clipboard,
+      defaultAllowFiles: files,
+    );
+    _save();
   }
 
   /// Set (or clear, with '') the fixed unattended password.

@@ -168,6 +168,31 @@ class WebRTCService {
     await _videoSender?.replaceTrack(track);
   }
 
+  /// Host side: cap the outgoing video encoding — used by the viewer's quality
+  /// presets (best quality / balanced / best performance). No renegotiation.
+  Future<void> applyQuality({
+    required int maxBitrateKbps,
+    required int maxFps,
+    double scaleDown = 1.0,
+  }) async {
+    final sender = _videoSender;
+    if (sender == null) return;
+    try {
+      final params = sender.parameters;
+      var encodings = params.encodings;
+      if (encodings == null || encodings.isEmpty) {
+        encodings = [RTCRtpEncoding()];
+      }
+      for (final e in encodings) {
+        e.maxBitrate = maxBitrateKbps * 1000;
+        e.maxFramerate = maxFps;
+        e.scaleResolutionDownBy = scaleDown;
+      }
+      params.encodings = encodings;
+      await sender.setParameters(params);
+    } catch (_) {}
+  }
+
   Future<RTCSessionDescription> createOffer() async {
     final offer = await _pc!.createOffer();
     // setCodecPreferences (above) is the clean way to force VP8, but desktop
