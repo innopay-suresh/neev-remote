@@ -37,6 +37,7 @@
 #include <wtsapi32.h>
 #include <userenv.h>
 #include <objidl.h>
+#include <shlobj.h>
 #include <gdiplus.h>
 #include <string>
 #include <vector>
@@ -371,8 +372,25 @@ static void WINAPI ServiceMain(DWORD, LPWSTR*) {
   DWORD agentSession = 0xFFFFFFFF;
   HANDLE host = nullptr;  // ServiceHost mode: the service-owned Flutter host
   DWORD hostSession = 0xFFFFFFFF;
+  HANDLE clip = nullptr;  // user-context clipboard agent (file clipboard)
+  DWORD clipSession = 0xFFFFFFFF;
   for (;;) {
     DWORD target = GetTargetSessionId();
+
+    // ---- clipboard agent (runs as the logged-in USER; file clipboard) ----
+    // Relaunch when it dies OR the active session moves. It self-skips at the
+    // logon screen (no interactive user), so retry keeps it best-effort.
+    bool cDead = (!clip || WaitForSingleObject(clip, 0) == WAIT_OBJECT_0);
+    bool cMoved = (clip && target != 0xFFFFFFFF && target != clipSession);
+    if (cDead || cMoved) {
+      if (clip) {
+        if (cMoved) TerminateProcess(clip, 0);
+        CloseHandle(clip);
+        clip = nullptr;
+      }
+      clip = LaunchClipAgentAsUser(target);  // may be null at logon screen
+      clipSession = target;
+    }
 
     // ---- helper agent (always kept alive in the active session) ----
     bool dead = (!agent || WaitForSingleObject(agent, 0) == WAIT_OBJECT_0);
@@ -433,6 +451,10 @@ static void WINAPI ServiceMain(DWORD, LPWSTR*) {
   if (host) {
     TerminateProcess(host, 0);
     CloseHandle(host);
+  }
+  if (clip) {
+    TerminateProcess(clip, 0);
+    CloseHandle(clip);
   }
   Log(L"svc", L"service stopping");
   SetState(SERVICE_STOPPED);
@@ -764,6 +786,215 @@ static std::wstring WidenUtf8(const std::string& s) {
   std::wstring w(n, L'\0');
   MultiByteToWideChar(CP_UTF8, 0, s.c_str(), (int)s.size(), &w[0], n);
   return w;
+}
+
+static std::string NarrowUtf8(const std::wstring& w) {
+  if (w.empty()) return std::string();
+  int n = WideCharToMultiByte(CP_UTF8, 0, w.c_str(), (int)w.size(), nullptr, 0,
+                              nullptr, nullptr);
+  std::string s(n, '\0');
+  WideCharToMultiByte(CP_UTF8, 0, w.c_str(), (int)w.size(), &s[0], n, nullptr,
+                      nullptr);
+  return s;
+}
+
+// ---- Clipboard agent (runs as the LOGGED-IN USER) -------------------------
+// A SYSTEM process can't reliably read/write the interactive user's FILE
+// clipboard (CF_HDROP is user + window-station scoped). This tiny agent is
+// launched by the service with the user's OWN token (WTSQueryUserToken), so it
+// runs as the real user on winsta0\default and can. The Flutter host asks it
+// over 127.0.0.1:47922. (Text clipboard already works and is untouched.)
+static const unsigned short kClipPort = 47922;
+#ifndef DROPEFFECT_COPY
+#define DROPEFFECT_COPY 1
+#endif
+
+static bool ClipRecvAll(SOCKET s, void* buf, int len) {
+  char* p = (char*)buf;
+  int got = 0;
+  while (got < len) {
+    int n = recv(s, p + got, len - got, 0);
+    if (n <= 0) return false;
+    got += n;
+  }
+  return true;
+}
+
+static bool ClipSendMsg(SOCKET s, char type, const std::string& payload) {
+  uint32_t len = (uint32_t)(1 + payload.size());
+  uint32_t nlen = htonl(len);
+  if (send(s, (char*)&nlen, 4, 0) != 4) return false;
+  if (send(s, &type, 1, 0) != 1) return false;
+  if (!payload.empty() &&
+      send(s, payload.data(), (int)payload.size(), 0) != (int)payload.size())
+    return false;
+  return true;
+}
+
+static bool ClipRecvMsg(SOCKET s, char& type, std::string& payload) {
+  uint32_t nlen = 0;
+  if (!ClipRecvAll(s, &nlen, 4)) return false;
+  uint32_t len = ntohl(nlen);
+  if (len < 1 || len > 64u * 1024u * 1024u) return false;
+  std::vector<char> buf(len);
+  if (!ClipRecvAll(s, buf.data(), (int)len)) return false;
+  type = buf[0];
+  payload.assign(buf.data() + 1, len - 1);
+  return true;
+}
+
+// CF_HDROP file paths on the clipboard -> newline-joined UTF-8.
+static std::string ClipReadFiles() {
+  std::string out;
+  if (!IsClipboardFormatAvailable(CF_HDROP)) return out;
+  if (!OpenClipboard(nullptr)) return out;
+  HANDLE h = GetClipboardData(CF_HDROP);
+  if (h) {
+    HDROP drop = (HDROP)GlobalLock(h);
+    if (drop) {
+      UINT n = DragQueryFileW(drop, 0xFFFFFFFF, nullptr, 0);
+      for (UINT i = 0; i < n; i++) {
+        wchar_t path[MAX_PATH] = {0};
+        if (DragQueryFileW(drop, i, path, MAX_PATH)) {
+          if (!out.empty()) out += "\n";
+          out += NarrowUtf8(path);
+        }
+      }
+      GlobalUnlock(h);
+    }
+  }
+  CloseClipboard();
+  return out;
+}
+
+// Put newline-joined UTF-8 paths on the clipboard as CF_HDROP + a "Preferred
+// DropEffect" of Copy (so Ctrl+V in Explorer reliably pastes as a copy).
+static bool ClipWriteFiles(const std::string& utf8Newline) {
+  std::vector<std::wstring> paths;
+  {
+    std::string cur;
+    for (char c : utf8Newline) {
+      if (c == '\n' || c == '\r') {
+        if (!cur.empty()) {
+          paths.push_back(WidenUtf8(cur));
+          cur.clear();
+        }
+      } else {
+        cur += c;
+      }
+    }
+    if (!cur.empty()) paths.push_back(WidenUtf8(cur));
+  }
+  if (paths.empty()) return false;
+
+  size_t chars = 0;
+  for (auto& p : paths) chars += p.size() + 1;
+  chars += 1;  // extra terminating null
+  size_t bytes = sizeof(DROPFILES) + chars * sizeof(wchar_t);
+  HGLOBAL hg = GlobalAlloc(GHND, bytes);
+  if (!hg) return false;
+  DROPFILES* df = (DROPFILES*)GlobalLock(hg);
+  df->pFiles = sizeof(DROPFILES);
+  df->fWide = TRUE;
+  wchar_t* w = (wchar_t*)((BYTE*)df + sizeof(DROPFILES));
+  for (auto& p : paths) {
+    wcscpy_s(w, p.size() + 1, p.c_str());
+    w += p.size() + 1;
+  }
+  *w = L'\0';
+  GlobalUnlock(hg);
+
+  HGLOBAL hEffect = GlobalAlloc(GHND, sizeof(DWORD));
+  if (hEffect) {
+    DWORD* e = (DWORD*)GlobalLock(hEffect);
+    *e = DROPEFFECT_COPY;
+    GlobalUnlock(hEffect);
+  }
+
+  if (!OpenClipboard(nullptr)) {
+    GlobalFree(hg);
+    if (hEffect) GlobalFree(hEffect);
+    return false;
+  }
+  EmptyClipboard();
+  SetClipboardData(CF_HDROP, hg);
+  if (hEffect) {
+    UINT cf = RegisterClipboardFormatW(CFSTR_PREFERREDDROPEFFECTW);
+    if (cf) SetClipboardData(cf, hEffect);
+  }
+  CloseClipboard();
+  return true;
+}
+
+static int RunClipAgent() {
+  WSADATA wsa;
+  WSAStartup(MAKEWORD(2, 2), &wsa);
+  SOCKET srv = socket(AF_INET, SOCK_STREAM, 0);
+  if (srv == INVALID_SOCKET) return 1;
+  BOOL yes = TRUE;
+  setsockopt(srv, SOL_SOCKET, SO_REUSEADDR, (char*)&yes, sizeof(yes));
+  sockaddr_in addr = {0};
+  addr.sin_family = AF_INET;
+  addr.sin_port = htons(kClipPort);
+  inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr);
+  if (bind(srv, (sockaddr*)&addr, sizeof(addr)) == SOCKET_ERROR) {
+    Log(L"clip", L"bind failed %lu", GetLastError());
+    return 1;
+  }
+  listen(srv, 4);
+  Log(L"clip", L"clipboard agent listening on 127.0.0.1:%u", kClipPort);
+  for (;;) {
+    SOCKET c = accept(srv, nullptr, nullptr);
+    if (c == INVALID_SOCKET) continue;
+    for (;;) {
+      char type = 0;
+      std::string payload;
+      if (!ClipRecvMsg(c, type, payload)) break;
+      if (type == 'R') {
+        ClipSendMsg(c, 'F', ClipReadFiles());
+      } else if (type == 'W') {
+        ClipSendMsg(c, ClipWriteFiles(payload) ? 'K' : 'E', "");
+      }
+    }
+    closesocket(c);
+  }
+}
+
+// Launch the clipboard agent AS THE LOGGED-IN USER of session [sid] (not the
+// SYSTEM-retargeted token used for the other helpers) so it can touch the
+// interactive file clipboard. Returns null at the logon screen (no user).
+static HANDLE LaunchClipAgentAsUser(DWORD sid) {
+  if (sid == 0xFFFFFFFF) return nullptr;
+  HANDLE userTok = nullptr;
+  if (!WTSQueryUserToken(sid, &userTok)) return nullptr;  // no interactive user
+  HANDLE primary = nullptr;
+  if (!DuplicateTokenEx(userTok, MAXIMUM_ALLOWED, nullptr, SecurityImpersonation,
+                        TokenPrimary, &primary)) {
+    CloseHandle(userTok);
+    return nullptr;
+  }
+  CloseHandle(userTok);
+  LPVOID env = nullptr;
+  CreateEnvironmentBlock(&env, primary, FALSE);
+  STARTUPINFOW si = {0};
+  si.cb = sizeof(si);
+  si.lpDesktop = const_cast<LPWSTR>(L"winsta0\\default");
+  PROCESS_INFORMATION pi = {0};
+  std::wstring cmd = L"\"" + SelfPath() + L"\" clipagent";
+  std::wstring mutableCmd = cmd;
+  BOOL ok = CreateProcessAsUserW(
+      primary, nullptr, &mutableCmd[0], nullptr, nullptr, FALSE,
+      CREATE_UNICODE_ENVIRONMENT | CREATE_NO_WINDOW, env, nullptr, &si, &pi);
+  if (env) DestroyEnvironmentBlock(env);
+  CloseHandle(primary);
+  if (!ok) {
+    Log(L"svc", L"CreateProcessAsUser(clipagent) failed: %lu", GetLastError());
+    return nullptr;
+  }
+  Log(L"svc", L"launched clipagent (as user) in session %lu (pid %lu)", sid,
+      pi.dwProcessId);
+  CloseHandle(pi.hThread);
+  return pi.hProcess;
 }
 
 // Type a unicode string into whatever field is focused on the current (secure)
@@ -1314,6 +1545,7 @@ int wmain(int argc, wchar_t** argv) {
     if (_wcsicmp(argv[1], L"install") == 0) return InstallService();
     if (_wcsicmp(argv[1], L"uninstall") == 0) return UninstallService();
     if (_wcsicmp(argv[1], L"agent") == 0) return RunAgent();
+    if (_wcsicmp(argv[1], L"clipagent") == 0) return RunClipAgent();
   }
   // No recognised argument: assume the SCM is starting us as a service.
   SERVICE_TABLE_ENTRYW table[] = {

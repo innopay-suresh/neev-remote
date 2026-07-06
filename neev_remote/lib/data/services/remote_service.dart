@@ -13,6 +13,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/constants/app_constants.dart';
 import 'auth_service.dart';
+import 'clip_agent_bridge.dart';
 import 'discovery_model.dart';
 import 'file_store.dart';
 import 'file_transfer_service.dart';
@@ -128,7 +129,10 @@ class RemoteService extends ChangeNotifier {
     try {
       _clipFileSuppress = 3;
       _lastClipFiles = [path];
-      await Pasteboard.writeFiles([path]);
+      // Prefer the user-context agent (works when the host is SYSTEM); fall back
+      // to the in-process clipboard (works when the host is attended).
+      final ok = await _clipAgent.writeFiles([path]);
+      if (!ok) await Pasteboard.writeFiles([path]);
     } catch (_) {}
   }
 
@@ -292,6 +296,10 @@ class RemoteService extends ChangeNotifier {
   // pastes the actual file.
   List<String> _lastClipFiles = const [];
   int _clipFileSuppress = 0; // ticks to skip re-sending a just-received file
+  // User-context clipboard agent (SYSTEM helper): reads/writes the interactive
+  // FILE clipboard that a SYSTEM host can't touch itself. Falls back to
+  // Pasteboard when absent (attended install).
+  final ClipAgentBridge _clipAgent = ClipAgentBridge();
 
   // ---- Host dead-man's switch: release stuck buttons if input goes silent
   // (viewer minimized / frozen / disconnected) so the host mouse never freezes.
@@ -1452,7 +1460,9 @@ class RemoteService extends ChangeNotifier {
     }
     List<String> paths;
     try {
-      paths = await Pasteboard.files();
+      // User-context agent first (reads the file clipboard even on a SYSTEM
+      // host); fall back to the in-process clipboard when there's no agent.
+      paths = await _clipAgent.readFiles() ?? await Pasteboard.files();
     } catch (_) {
       return;
     }
