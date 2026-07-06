@@ -261,65 +261,36 @@ class _ConnectPageState extends ConsumerState<ConnectPage> {
     if (ref.read(settingsProvider).soundOnConnect) {
       SystemSound.play(SystemSoundType.alert);
     }
-    bool control = service.defaultPermControl;
-    bool clipboard = service.defaultPermClipboard;
-    bool files = service.defaultPermFiles;
     final accepted = await showDialog<bool>(
       context: context,
       barrierDismissible: false,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setDlg) => AlertDialog(
-          title: Row(children: [
-            const Icon(Icons.shield_outlined, color: AppColors.primary),
-            const SizedBox(width: 10),
-            Text('Incoming connection', style: AppTypography.title),
-          ]),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('Someone wants to connect to this computer. They will be '
-                  'able to see and control the screen. Choose what else to '
-                  'allow, then accept or dismiss.',
-                  style: AppTypography.caption),
-              const SizedBox(height: 8),
-              _permSwitch('Share clipboard', Icons.content_paste_outlined,
-                  clipboard, (v) => setDlg(() => clipboard = v)),
-              _permSwitch('Allow file transfer', Icons.folder_outlined, files,
-                  (v) => setDlg(() => files = v)),
-            ],
+      builder: (ctx) => AlertDialog(
+        title: Row(children: [
+          const Icon(Icons.shield_outlined, color: AppColors.primary),
+          const SizedBox(width: 10),
+          Text('Incoming connection', style: AppTypography.title),
+        ]),
+        content: Text(
+            'Someone wants to connect to this computer. They will be able to '
+            'see and control the screen. Accept?',
+            style: AppTypography.caption),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Dismiss')),
+          FilledButton.icon(
+            onPressed: () => Navigator.pop(ctx, true),
+            icon: const Icon(Icons.check, size: 18),
+            label: const Text('Accept'),
           ),
-          actions: [
-            TextButton(
-                onPressed: () => Navigator.pop(ctx, false),
-                child: const Text('Dismiss')),
-            FilledButton.icon(
-              onPressed: () => Navigator.pop(ctx, true),
-              icon: const Icon(Icons.check, size: 18),
-              label: const Text('Accept'),
-            ),
-          ],
-        ),
+        ],
       ),
     );
     if (accepted == true) {
-      await service.acceptConnection(
-          control: control, clipboard: clipboard, files: files);
+      await service.acceptConnection();
     } else {
       service.rejectConnection();
     }
-  }
-
-  Widget _permSwitch(
-      String label, IconData icon, bool value, ValueChanged<bool> onChanged) {
-    return SwitchListTile(
-      contentPadding: EdgeInsets.zero,
-      dense: true,
-      value: value,
-      onChanged: onChanged,
-      secondary: Icon(icon, size: 20, color: AppColors.textSecondary),
-      title: Text(label, style: AppTypography.body),
-    );
   }
 
   void _openChatFromNotification() {

@@ -220,24 +220,6 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                 ),
                 const Divider(),
                 _buildToggle(
-                  label: 'Share clipboard by default',
-                  subtitle: 'Sync text, images and files',
-                  value: settings.defaultAllowClipboard,
-                  onChanged: (v) => ref
-                      .read(settingsProvider.notifier)
-                      .setDefaultPermission(clipboard: v),
-                ),
-                const Divider(),
-                _buildToggle(
-                  label: 'Allow file transfer by default',
-                  subtitle: 'Export / Import and clipboard files',
-                  value: settings.defaultAllowFiles,
-                  onChanged: (v) => ref
-                      .read(settingsProvider.notifier)
-                      .setDefaultPermission(files: v),
-                ),
-                const Divider(),
-                _buildToggle(
                   label: 'Lock this device on session end',
                   subtitle: 'Lock the screen when the last viewer disconnects',
                   value: settings.lockOnSessionEnd,

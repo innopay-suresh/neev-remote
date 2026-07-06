@@ -1041,7 +1041,6 @@ class RemoteService extends ChangeNotifier {
     if (m == null) return;
 
     if (m['k'] == 'clip') {
-      if (isHost && !permClipboard) return; // clipboard sharing denied
       if (m['img'] == 1) {
         _recvClipImage(m);
         return;
@@ -1077,7 +1076,6 @@ class RemoteService extends ChangeNotifier {
     }
     // File transfer (either direction).
     if (m['k'] == 'ft') {
-      if (isHost && !permFiles) return; // file transfer denied for this session
       _files.handleMessage(m);
       return;
     }
