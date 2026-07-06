@@ -295,3 +295,108 @@ class RecentConnectionsNotifier extends StateNotifier<List<RecentConnection>> {
     _save();
   }
 }
+
+// ---- Address Book (saved contacts) + Favorites ----------------------------
+
+class AddressBookEntry {
+  final String id;
+  final String name;
+  final bool favorite;
+  final String note;
+  const AddressBookEntry({
+    required this.id,
+    required this.name,
+    this.favorite = false,
+    this.note = '',
+  });
+
+  AddressBookEntry copyWith({String? name, bool? favorite, String? note}) =>
+      AddressBookEntry(
+        id: id,
+        name: name ?? this.name,
+        favorite: favorite ?? this.favorite,
+        note: note ?? this.note,
+      );
+}
+
+final addressBookProvider =
+    StateNotifierProvider<AddressBookNotifier, List<AddressBookEntry>>(
+        (ref) => AddressBookNotifier());
+
+class AddressBookNotifier extends StateNotifier<List<AddressBookEntry>> {
+  AddressBookNotifier() : super([]) {
+    _load();
+  }
+
+  static const _key = 'addressBook';
+
+  Future<void> _load() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getStringList(_key) ?? const [];
+      state = [
+        for (final e in raw)
+          if (jsonDecode(e) case final Map m)
+            AddressBookEntry(
+              id: '${m['id']}',
+              name: '${m['name'] ?? m['id']}',
+              favorite: m['fav'] == true,
+              note: '${m['note'] ?? ''}',
+            ),
+      ];
+    } catch (_) {}
+  }
+
+  Future<void> _save() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setStringList(_key, [
+        for (final c in state)
+          jsonEncode({
+            'id': c.id,
+            'name': c.name,
+            'fav': c.favorite,
+            'note': c.note,
+          }),
+      ]);
+    } catch (_) {}
+  }
+
+  AddressBookEntry? _find(String id) {
+    for (final e in state) {
+      if (e.id == id) return e;
+    }
+    return null;
+  }
+
+  /// Add or update a contact (keyed by id). Preserves the favorite flag on
+  /// re-add unless explicitly changed.
+  void upsert(String id, {String? name, bool? favorite, String? note}) {
+    id = id.trim();
+    if (id.isEmpty) return;
+    final existing = _find(id);
+    final entry = (existing ?? AddressBookEntry(id: id, name: id)).copyWith(
+      name: name?.trim().isNotEmpty == true ? name!.trim() : null,
+      favorite: favorite,
+      note: note,
+    );
+    state = [entry, ...state.where((e) => e.id != id)];
+    _save();
+  }
+
+  void remove(String id) {
+    state = state.where((e) => e.id != id).toList();
+    _save();
+  }
+
+  void toggleFavorite(String id) {
+    final e = _find(id);
+    if (e == null) {
+      upsert(id, favorite: true);
+    } else {
+      upsert(id, favorite: !e.favorite);
+    }
+  }
+
+  bool isFavorite(String id) => _find(id)?.favorite ?? false;
+}
