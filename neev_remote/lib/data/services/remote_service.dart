@@ -1118,7 +1118,7 @@ class RemoteService extends ChangeNotifier {
     // field (UAC / login prompt). Routed through the SYSTEM helper so it reaches
     // the secure desktop / elevated windows.
     if (m['k'] == 'type') {
-      if (isHost && permControl) {
+      if (isHost) {
         _uac.sendTypeText(
           (m['t'] as String?) ?? '',
           tab: m['tab'] == true,
@@ -1129,7 +1129,10 @@ class RemoteService extends ChangeNotifier {
     }
 
     if (isHost) {
-      if (!permControl) return; // control not granted → view-only
+      // NOTE: no host-side "control permission" gate here — it silently dropped
+      // ALL input if the flag was ever false (a footgun that broke clicking).
+      // View-only is enforced on the VIEWER side (it simply doesn't send input),
+      // which is the reliable place for it.
       final event = InputEvent.decode(raw);
       if (event != null) {
         _trackHeldButton(event);

@@ -220,15 +220,6 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                 ),
                 const Divider(),
                 _buildToggle(
-                  label: 'Allow control by default',
-                  subtitle: 'Let viewers use the keyboard and mouse',
-                  value: settings.defaultAllowControl,
-                  onChanged: (v) => ref
-                      .read(settingsProvider.notifier)
-                      .setDefaultPermission(control: v),
-                ),
-                const Divider(),
-                _buildToggle(
                   label: 'Share clipboard by default',
                   subtitle: 'Sync text, images and files',
                   value: settings.defaultAllowClipboard,

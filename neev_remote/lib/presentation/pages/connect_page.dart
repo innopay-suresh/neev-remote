@@ -278,12 +278,11 @@ class _ConnectPageState extends ConsumerState<ConnectPage> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('Someone wants to connect to this computer. Choose what '
-                  'they can do, then accept or dismiss.',
+              Text('Someone wants to connect to this computer. They will be '
+                  'able to see and control the screen. Choose what else to '
+                  'allow, then accept or dismiss.',
                   style: AppTypography.caption),
               const SizedBox(height: 8),
-              _permSwitch('Control keyboard & mouse', Icons.mouse_outlined,
-                  control, (v) => setDlg(() => control = v)),
               _permSwitch('Share clipboard', Icons.content_paste_outlined,
                   clipboard, (v) => setDlg(() => clipboard = v)),
               _permSwitch('Allow file transfer', Icons.folder_outlined, files,
