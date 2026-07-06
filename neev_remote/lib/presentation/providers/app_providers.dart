@@ -75,6 +75,7 @@ class DiscoveryController extends ChangeNotifier {
   String get status => _svc.status;
   List<DiscoveredDevice> get devices => _svc.devices;
   void setId(String? id) => _svc.setId(id ?? '');
+  void refresh() => _svc.refresh();
   @override
   void dispose() {
     _svc.dispose();

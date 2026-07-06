@@ -55,6 +55,15 @@ class DiscoveryService {
   /// hosting id becomes available or changes.
   void setId(String id) => _id = id;
 
+  /// Force a rescan: drop the current list, refresh interface targets, and
+  /// re-announce immediately (the Discovery page refresh button).
+  Future<void> refresh() async {
+    _devices.clear();
+    onChange?.call();
+    await _refreshBroadcastTargets();
+    _announce();
+  }
+
   Future<void> _bind() async {
     try {
       final s = await RawDatagramSocket.bind(InternetAddress.anyIPv4, _port,

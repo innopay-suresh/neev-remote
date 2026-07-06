@@ -8,6 +8,7 @@ class DiscoveryService {
   void Function()? onChange;
   void start() {}
   void setId(String id) {}
+  Future<void> refresh() async {}
   void stop() {}
   void dispose() {}
 }

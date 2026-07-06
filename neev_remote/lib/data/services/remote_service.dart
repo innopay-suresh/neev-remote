@@ -485,6 +485,13 @@ class RemoteService extends ChangeNotifier {
     });
   }
 
+  /// Force an immediate relay discovery poll (the Discovery page refresh button).
+  void refreshDiscovery() {
+    _serverPeers.clear();
+    notifyListeners();
+    _hostSignaling?.sendDiscover();
+  }
+
   void _onServerPeers(dynamic payload) {
     if (payload is! Map) return;
     final list = payload['peers'];

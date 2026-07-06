@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/constants/app_constants.dart';
 import '../../core/theme/app_theme.dart';
 import '../../data/services/discovery_service.dart';
 import '../../data/services/remote_service.dart';
@@ -988,14 +989,18 @@ class _DiscoveryPage extends ConsumerWidget {
     final disc = ref.watch(discoveryProvider);
     final service = ref.watch(remoteServiceProvider);
     // Merge LAN broadcast (UDP) + server-assisted (relay) discovery, deduped by
-    // id — the relay path finds machines even when the network blocks UDP.
+    // id. UDP entries carry the real LAN IP; server entries don't — so when a
+    // machine shows up in both, keep the UDP one (real IP) instead of letting
+    // the server entry blank it out.
     final byId = <String, DiscoveredDevice>{};
-    for (final d in disc.devices) {
-      byId[d.id] = d;
-    }
     for (final d in service.serverPeers) {
       byId[d.id] = d;
     }
+    for (final d in disc.devices) {
+      byId[d.id] = d; // UDP wins — it has the real IP
+    }
+    // Never list ourselves.
+    byId.remove(service.agentId);
     final devices = byId.values.toList()
       ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
     return SingleChildScrollView(
@@ -1018,6 +1023,15 @@ class _DiscoveryPage extends ConsumerWidget {
                   if (devices.isNotEmpty)
                     Text('${devices.length} found',
                         style: AppTypography.caption),
+                  IconButton(
+                    tooltip: 'Refresh',
+                    visualDensity: VisualDensity.compact,
+                    icon: const Icon(Icons.refresh_rounded, size: 20),
+                    onPressed: () {
+                      service.refreshDiscovery();
+                      ref.read(discoveryProvider).refresh();
+                    },
+                  ),
                 ]),
                 const SizedBox(height: 2),
                 Text(disc.supported ? disc.status : 'LAN discovery runs on the '
@@ -1286,6 +1300,20 @@ class _TopBar extends ConsumerWidget {
           ),
           const SizedBox(width: 10),
           Text('Neev Remote', style: AppTypography.title),
+          const SizedBox(width: 8),
+          // Build stamp — lets us confirm which version is actually running.
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+            decoration: BoxDecoration(
+              color: AppColors.primarySoft,
+              borderRadius: BorderRadius.circular(6),
+            ),
+            child: Text(AppConstants.buildTag,
+                style: const TextStyle(
+                    fontSize: 10.5,
+                    color: AppColors.primaryDark,
+                    fontWeight: FontWeight.w600)),
+          ),
           const SizedBox(width: AppSpacing.md),
           _StatusPill(online: online),
           const Spacer(),

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../core/constants/app_constants.dart';
 import '../../core/theme/app_theme.dart';
 import '../../data/services/remote_service.dart';
 import '../providers/app_providers.dart';
@@ -185,7 +186,9 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
     return [
       _buildSectionHeader('About'),
       _buildSettingsCard([
-        _buildInfoRow('Version', '1.0.0'),
+        _buildInfoRow('Version', AppConstants.appVersion),
+        const Divider(),
+        _buildInfoRow('Build', AppConstants.buildTag),
         const Divider(),
         _buildInfoRow('Platform', 'Desktop'),
         const Divider(),
