@@ -1057,6 +1057,36 @@ static void SendMachineCreds() {
   PipeSend('m', (const BYTE*)out.data(), (DWORD)out.size());
 }
 
+// Generate a real Ctrl+Alt+Del (Secure Attention Sequence). Only a SYSTEM
+// service can do this; a normal app's synthetic Ctrl+Alt+Del is ignored by
+// Windows. First enable the "services may generate SAS" policy (we run as
+// SYSTEM so we can write it), then call SendSAS from sas.dll.
+static void TriggerSAS() {
+  HKEY k;
+  if (RegCreateKeyExW(
+          HKEY_LOCAL_MACHINE,
+          L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System", 0,
+          nullptr, 0, KEY_SET_VALUE, nullptr, &k, nullptr) == ERROR_SUCCESS) {
+    DWORD v = 1;  // 1 = services, 2 = ease-of-access apps, 3 = both
+    RegSetValueExW(k, L"SoftwareSASGeneration", 0, REG_DWORD, (const BYTE*)&v,
+                   sizeof(v));
+    RegCloseKey(k);
+  }
+  typedef void(WINAPI * SendSAS_t)(BOOL);
+  HMODULE h = LoadLibraryW(L"sas.dll");
+  if (h) {
+    SendSAS_t fn = (SendSAS_t)GetProcAddress(h, "SendSAS");
+    if (fn) {
+      fn(FALSE);  // FALSE = called from a service (SYSTEM, session 0)
+      Log(L"agent", L"SAS (Ctrl+Alt+Del) triggered");
+    } else {
+      Log(L"agent", L"SendSAS not found in sas.dll");
+    }
+  } else {
+    Log(L"agent", L"sas.dll not available");
+  }
+}
+
 // A viewer command (click/key) -> inject onto the secure desktop.
 static void HandleClientMessage(const std::vector<BYTE>& m) {
   if (m.empty()) return;
@@ -1079,6 +1109,9 @@ static void HandleClientMessage(const std::vector<BYTE>& m) {
     std::string s(m.begin() + 2, m.end());
     InjectTextOnSecureDesktop(WidenUtf8(s), (flags & 0x02) != 0,
                               (flags & 0x01) != 0);
+  } else if (m[0] == 'S') {
+    // Ctrl+Alt+Del (Secure Attention Sequence).
+    TriggerSAS();
   } else if (m[0] == 'M') {
     // getcreds: host asks for the machine-wide id + password.
     SendMachineCreds();

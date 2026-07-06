@@ -623,6 +623,59 @@ class RemoteService extends ChangeNotifier {
     _reconnectTries = 0;
   }
 
+  // ---- Actions menu (viewer → host), AnyDesk-parity ------------------------
+
+  /// Viewer: lock the remote machine (its sign-in screen).
+  void lockRemote() =>
+      _viewerPeer?.sendData(jsonEncode({'k': 'cmd', 'c': 'lock'}));
+
+  /// Viewer: sign the remote user out (log off).
+  void signOutRemote() =>
+      _viewerPeer?.sendData(jsonEncode({'k': 'cmd', 'c': 'logoff'}));
+
+  /// Viewer: send Ctrl+Alt+Del to the remote (routed through its SYSTEM helper
+  /// so the real Secure Attention Sequence fires, not an ignored synthetic one).
+  void sendCtrlAltDel() =>
+      _viewerPeer?.sendData(jsonEncode({'k': 'cmd', 'c': 'sas'}));
+
+  /// Viewer: paste the local clipboard text into the remote's focused field
+  /// ("Insert from clipboard"). Types via the host helper so it reaches secure
+  /// / elevated windows too.
+  Future<bool> insertClipboardToRemote() async {
+    try {
+      final data = await Clipboard.getData('text/plain');
+      final text = data?.text ?? '';
+      if (text.isEmpty) return false;
+      transmitText(text);
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Viewer: grab the current remote frame as a PNG and save it to Downloads.
+  /// Returns the saved path, or null if unavailable.
+  Future<String?> captureRemoteScreenshot() async {
+    try {
+      final track = _remoteStream?.getVideoTracks();
+      if (track == null || track.isEmpty) return null;
+      final buffer = await track.first.captureFrame();
+      final bytes = buffer.asUint8List();
+      if (bytes.isEmpty) return null;
+      final ts = DateTime.now();
+      final name =
+          'neev-screenshot-${ts.year}${_two(ts.month)}${_two(ts.day)}-'
+          '${_two(ts.hour)}${_two(ts.minute)}${_two(ts.second)}.png';
+      final store = FileStore();
+      if (!store.supported) return null;
+      return await store.saveToDownloads(name, bytes);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  String _two(int n) => n.toString().padLeft(2, '0');
+
   // Re-dial the same host after an unexpected drop while auto-reconnect is on.
   void _maybeScheduleReconnect() {
     if (!autoReconnect) return;
@@ -651,10 +704,22 @@ class RemoteService extends ChangeNotifier {
 
   // Host: run a command sent by the controlling viewer.
   void _onHostCommand(Map<String, dynamic> m) {
-    if (m['c'] == 'reboot') {
-      rebootMachine();
-    } else if (m['c'] == 'privacy') {
-      PrivacyMode.set(m['on'] == true);
+    switch (m['c']) {
+      case 'reboot':
+        rebootMachine();
+        break;
+      case 'privacy':
+        PrivacyMode.set(m['on'] == true);
+        break;
+      case 'lock':
+        lockMachine();
+        break;
+      case 'logoff':
+        signOutMachine();
+        break;
+      case 'sas': // Ctrl+Alt+Del via the SYSTEM helper (SAS).
+        _uac.sendSas();
+        break;
     }
   }
 

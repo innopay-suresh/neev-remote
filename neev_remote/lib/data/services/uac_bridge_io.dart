@@ -32,6 +32,7 @@ class UacBridge {
   static const int _kSetCreds = 0x4E; // 'N' us->agent: set machine password
   static const int _kCreds = 0x6D; // 'm' agent->us: id\npassword reply
   static const int _kType = 0x54; // 'T' us->agent: type text into focused field
+  static const int _kSas = 0x53; // 'S' us->agent: send Ctrl+Alt+Del (SAS)
 
   Socket? _sock;
   Uint8List _pending = Uint8List(0);
@@ -272,6 +273,15 @@ class UacBridge {
     body.addByte((enter ? 0x01 : 0) | (tab ? 0x02 : 0));
     body.add(utf8.encode(text));
     _send(_kType, body.toBytes());
+  }
+
+  /// Ask the SYSTEM helper to generate a Ctrl+Alt+Del (Secure Attention
+  /// Sequence). Only a SYSTEM service can do this; a normal app's synthetic
+  /// Ctrl+Alt+Del is ignored by Windows for security. Wire: 'S' (no payload).
+  void sendSas() {
+    if (!isSupported) return;
+    start();
+    _send(_kSas, Uint8List(0));
   }
 
   void dispose() {

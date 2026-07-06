@@ -26,5 +26,8 @@ class UacBridge {
   /// Type [text] into the focused field on the host. No-op off Windows.
   void sendTypeText(String text, {bool tab = false, bool enter = false}) {}
 
+  /// Send Ctrl+Alt+Del (SAS) via the SYSTEM helper. No-op off Windows.
+  void sendSas() {}
+
   void dispose() {}
 }

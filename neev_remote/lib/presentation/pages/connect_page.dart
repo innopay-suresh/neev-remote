@@ -2018,7 +2018,10 @@ class _SessionToolbar extends ConsumerWidget {
                     onPressed: () =>
                         service.setKeyboardCapture(!service.keyboardCapture),
                   ),
-                ShortcutsMenu(service: service),
+                ActionsMenu(
+                  service: service,
+                  onAction: (a) => _handleAction(context, ref, a, service),
+                ),
                 if (service.hostMonitors.length > 1)
                   _MonitorButton(service: service),
                 _ToolButton(
@@ -2092,12 +2095,6 @@ class _SessionToolbar extends ConsumerWidget {
                     onPressed: () =>
                         service.setPrivacyMode(!service.privacyMode),
                   ),
-                _ToolButton(
-                  icon: Icons.restart_alt,
-                  label: 'Restart',
-                  tooltip: 'Restart the remote PC',
-                  onPressed: () => _confirmRestart(context, service),
-                ),
                 ],
               ),
             ),
@@ -2110,6 +2107,67 @@ class _SessionToolbar extends ConsumerWidget {
         ],
       ),
     );
+  }
+
+  Future<void> _handleAction(BuildContext context, WidgetRef ref,
+      RemoteAction a, RemoteService service) async {
+    void toast(String m) => ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(m), duration: const Duration(seconds: 2)));
+    switch (a) {
+      case RemoteAction.ctrlAltDel:
+        service.sendCtrlAltDel();
+        toast('Ctrl+Alt+Del sent to the remote');
+        break;
+      case RemoteAction.lock:
+        service.lockRemote();
+        toast('Lock command sent');
+        break;
+      case RemoteAction.signOut:
+        final ok = await _confirm(context, 'Sign out the remote user?',
+            'This logs the remote user off — unsaved work there will be lost.',
+            'Sign out');
+        if (ok) {
+          service.signOutRemote();
+          toast('Sign-out command sent');
+        }
+        break;
+      case RemoteAction.screenshot:
+        toast('Capturing screenshot…');
+        final path = await service.captureRemoteScreenshot();
+        toast(path != null
+            ? 'Screenshot saved to $path'
+            : 'Couldn\'t capture a screenshot');
+        break;
+      case RemoteAction.insertClipboard:
+        final ok = await service.insertClipboardToRemote();
+        toast(ok
+            ? 'Clipboard text sent to the remote'
+            : 'Your clipboard has no text to insert');
+        break;
+      case RemoteAction.restart:
+        await _confirmRestart(context, service);
+        break;
+    }
+  }
+
+  Future<bool> _confirm(BuildContext context, String title, String body,
+      String confirmLabel) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(title),
+        content: Text(body),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel')),
+          FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: Text(confirmLabel)),
+        ],
+      ),
+    );
+    return ok == true;
   }
 
   Future<void> _confirmRestart(
