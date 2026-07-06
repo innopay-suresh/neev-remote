@@ -2424,11 +2424,14 @@ class _SessionToolbar extends ConsumerWidget {
           _ConnectionBadge(id: service.targetId ?? '—'),
           const SizedBox(width: AppSpacing.md),
           _StatsStrip(stats: stats),
-          const Spacer(),
-          Flexible(
+          const SizedBox(width: AppSpacing.md),
+          // Left-aligned, forward scroll: the primary + newest buttons
+          // (Favorite, Control, Actions, Quality, Annotate…) are ALWAYS visible;
+          // only the trailing ones scroll off on a narrow window (was reverse:
+          // true, which hid exactly the new buttons off the left edge).
+          Expanded(
             child: SingleChildScrollView(
               scrollDirection: Axis.horizontal,
-              reverse: true,
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
