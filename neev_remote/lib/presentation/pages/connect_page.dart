@@ -98,6 +98,17 @@ class _ConnectPageState extends ConsumerState<ConnectPage> {
       _lastChatCount = msgs.length;
     });
 
+    // Attended access: prompt on incoming connections unless unattended access
+    // is enabled (then accept silently, AnyDesk-style).
+    service.promptOnConnect = !ref.watch(settingsProvider).unattendedEnabled;
+
+    // Show the consent prompt when a new incoming connection is pending.
+    ref.listen<RemoteService>(remoteServiceProvider, (prev, next) {
+      if (next.pendingConsent != null && prev?.pendingConsent == null) {
+        _showConsentDialog(next.pendingConsent!);
+      }
+    });
+
     // Active remote session takes the whole window.
     if (service.viewerStatus == ViewerStatus.connected) {
       return _ConnectedSession(service: service);
@@ -232,6 +243,69 @@ class _ConnectPageState extends ConsumerState<ConnectPage> {
     _chatToastTimer = null;
     _chatToast?.remove();
     _chatToast = null;
+  }
+
+  // AnyDesk-style incoming-connection consent with per-session permissions.
+  Future<void> _showConsentDialog(ConsentRequest req) async {
+    final service = ref.read(remoteServiceProvider);
+    bool control = true, clipboard = true, files = true;
+    final accepted = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDlg) => AlertDialog(
+          title: Row(children: [
+            const Icon(Icons.shield_outlined, color: AppColors.primary),
+            const SizedBox(width: 10),
+            Text('Incoming connection', style: AppTypography.title),
+          ]),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Someone wants to connect to this computer. Choose what '
+                  'they can do, then accept or dismiss.',
+                  style: AppTypography.caption),
+              const SizedBox(height: 8),
+              _permSwitch('Control keyboard & mouse', Icons.mouse_outlined,
+                  control, (v) => setDlg(() => control = v)),
+              _permSwitch('Share clipboard', Icons.content_paste_outlined,
+                  clipboard, (v) => setDlg(() => clipboard = v)),
+              _permSwitch('Allow file transfer', Icons.folder_outlined, files,
+                  (v) => setDlg(() => files = v)),
+            ],
+          ),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Dismiss')),
+            FilledButton.icon(
+              onPressed: () => Navigator.pop(ctx, true),
+              icon: const Icon(Icons.check, size: 18),
+              label: const Text('Accept'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (accepted == true) {
+      await service.acceptConnection(
+          control: control, clipboard: clipboard, files: files);
+    } else {
+      service.rejectConnection();
+    }
+  }
+
+  Widget _permSwitch(
+      String label, IconData icon, bool value, ValueChanged<bool> onChanged) {
+    return SwitchListTile(
+      contentPadding: EdgeInsets.zero,
+      dense: true,
+      value: value,
+      onChanged: onChanged,
+      secondary: Icon(icon, size: 20, color: AppColors.textSecondary),
+      title: Text(label, style: AppTypography.body),
+    );
   }
 
   void _openChatFromNotification() {

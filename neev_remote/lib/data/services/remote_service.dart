@@ -41,6 +41,12 @@ class ChatMessage {
   ChatMessage(this.text, {required this.mine});
 }
 
+/// A pending incoming-connection request awaiting the host user's consent.
+class ConsentRequest {
+  final String controllerId;
+  ConsentRequest(this.controllerId);
+}
+
 /// Central orchestrator that turns the signaling + WebRTC + capture services
 /// into a working remote-desktop session, for both roles:
 ///
@@ -197,6 +203,39 @@ class RemoteService extends ChangeNotifier {
 
   /// Hosts the relay reports on our network (from the last `peers` reply).
   List<DiscoveredDevice> get serverPeers => _serverPeers.values.toList();
+
+  // ---- Incoming-connection consent + per-session permissions (host) --------
+  /// When true, an incoming connection prompts the host user (Accept/Dismiss).
+  /// Set false for unattended access. The app wires this from settings.
+  bool promptOnConnect = true;
+  ConsentRequest? _pendingConsent;
+  ConsentRequest? get pendingConsent => _pendingConsent;
+  // Permissions granted to the current session (host → viewer).
+  bool permControl = true;
+  bool permClipboard = true;
+  bool permFiles = true;
+
+  /// Host: accept the pending incoming connection with the chosen permissions.
+  Future<void> acceptConnection(
+      {bool control = true, bool clipboard = true, bool files = true}) async {
+    final req = _pendingConsent;
+    if (req == null) return;
+    permControl = control;
+    permClipboard = clipboard;
+    permFiles = files;
+    _pendingConsent = null;
+    notifyListeners();
+    await _startHostOffer(req.controllerId);
+  }
+
+  /// Host: decline the pending incoming connection.
+  void rejectConnection() {
+    final req = _pendingConsent;
+    if (req == null) return;
+    _pendingConsent = null;
+    notifyListeners();
+    _hostSignaling?.sendBye(req.controllerId);
+  }
   String? _password;
   String? _hostError;
 
@@ -385,7 +424,17 @@ class RemoteService extends ChangeNotifier {
       case SignalingMessageType.connect:
         // A controller wants in. msg.from is the controller's routing id.
         final controllerId = msg.from;
-        if (controllerId != null) await _startHostOffer(controllerId);
+        if (controllerId == null) break;
+        // Attended: ask the host user first (AnyDesk-style). Unattended access
+        // (promptOnConnect=false) accepts immediately with full permissions.
+        if (promptOnConnect) {
+          permControl = permClipboard = permFiles = true;
+          _pendingConsent = ConsentRequest(controllerId);
+          notifyListeners();
+        } else {
+          permControl = permClipboard = permFiles = true;
+          await _startHostOffer(controllerId);
+        }
         break;
       case SignalingMessageType.answer:
         final peer = _hostPeers[msg.from];
@@ -924,6 +973,7 @@ class RemoteService extends ChangeNotifier {
     if (m == null) return;
 
     if (m['k'] == 'clip') {
+      if (isHost && !permClipboard) return; // clipboard sharing denied
       if (m['img'] == 1) {
         _recvClipImage(m);
         return;
@@ -959,6 +1009,7 @@ class RemoteService extends ChangeNotifier {
     }
     // File transfer (either direction).
     if (m['k'] == 'ft') {
+      if (isHost && !permFiles) return; // file transfer denied for this session
       _files.handleMessage(m);
       return;
     }
@@ -994,7 +1045,7 @@ class RemoteService extends ChangeNotifier {
     // field (UAC / login prompt). Routed through the SYSTEM helper so it reaches
     // the secure desktop / elevated windows.
     if (m['k'] == 'type') {
-      if (isHost) {
+      if (isHost && permControl) {
         _uac.sendTypeText(
           (m['t'] as String?) ?? '',
           tab: m['tab'] == true,
@@ -1005,6 +1056,7 @@ class RemoteService extends ChangeNotifier {
     }
 
     if (isHost) {
+      if (!permControl) return; // control not granted → view-only
       final event = InputEvent.decode(raw);
       if (event != null) {
         _trackHeldButton(event);
