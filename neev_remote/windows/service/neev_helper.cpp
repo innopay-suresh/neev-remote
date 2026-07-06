@@ -339,6 +339,10 @@ static HANDLE LaunchHostInSession(DWORD sid) {
       sid, L"\"" + HostExePath() + L"\" --service-host", L"host");
 }
 
+// Defined lower down (with the clipboard agent), but used by the service loop
+// above it — forward-declare so it's visible here.
+static HANDLE LaunchClipAgentAsUser(DWORD sid);
+
 // --------------------------------------------------------------------------
 // Service control + main loop. Keeps exactly one agent alive, relaunching it
 // when it exits (e.g. session switch / logoff).
@@ -919,7 +923,7 @@ static bool ClipWriteFiles(const std::string& utf8Newline) {
   EmptyClipboard();
   SetClipboardData(CF_HDROP, hg);
   if (hEffect) {
-    UINT cf = RegisterClipboardFormatW(CFSTR_PREFERREDDROPEFFECTW);
+    UINT cf = RegisterClipboardFormatW(L"Preferred DropEffect");
     if (cf) SetClipboardData(cf, hEffect);
   }
   CloseClipboard();
