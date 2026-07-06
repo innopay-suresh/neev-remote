@@ -25,6 +25,14 @@ WizardStyle=modern
 ; service and to install into Program Files. The installer elevates once, like
 ; AnyDesk/TeamViewer.
 PrivilegesRequired=admin
+; Clean upgrades: the host runs continuously (the SYSTEM service auto-launches
+; neev_remote.exe), so on re-install its exe/DLLs are LOCKED and Windows can't
+; overwrite them — leaving the OLD version in place. Close the running app +
+; helper first (see PrepareToInstall) and let Inno close any file-holding
+; process so every file is actually replaced.
+CloseApplications=yes
+CloseApplicationsFilter=neev_remote.exe,neev_helper.exe,*.dll
+RestartApplications=no
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
@@ -69,3 +77,39 @@ Root: HKLM; Subkey: "SOFTWARE\NeevRemote"; ValueType: dword; ValueName: "Service
 [UninstallRun]
 ; Always remove the service on uninstall (no-op if it was never installed).
 Filename: "{app}\neev_helper.exe"; Parameters: "uninstall"; Flags: runhidden; RunOnceId: "uninstallneevhelper"
+
+[Code]
+// Before copying any files, stop + remove the running host so its locked exe /
+// DLLs can actually be overwritten (otherwise an upgrade silently keeps the old
+// version). Runs on every install; harmless on a first-time install.
+procedure StopRunningNeev;
+var
+  ResultCode: Integer;
+begin
+  // Stop the SYSTEM helper service (releases neev_helper.exe + the host it spawns).
+  Exec(ExpandConstant('{app}\neev_helper.exe'), 'uninstall', '',
+    SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  // Force-close any lingering host / helper processes so their files unlock.
+  Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /IM neev_remote.exe /T', '',
+    SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /IM neev_helper.exe /T', '',
+    SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  // Give Windows a moment to release the file handles.
+  Sleep(1500);
+end;
+
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+begin
+  StopRunningNeev();
+  Result := '';
+end;
+
+// Also stop the running host before an uninstall, so its files can be removed.
+function InitializeUninstall(): Boolean;
+var
+  ResultCode: Integer;
+begin
+  Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /IM neev_remote.exe /T', '',
+    SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Result := True;
+end;
