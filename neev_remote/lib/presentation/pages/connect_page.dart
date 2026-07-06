@@ -106,6 +106,7 @@ class _ConnectPageState extends ConsumerState<ConnectPage> {
     service.defaultPermControl = _s.defaultAllowControl;
     service.defaultPermClipboard = _s.defaultAllowClipboard;
     service.defaultPermFiles = _s.defaultAllowFiles;
+    service.lockOnSessionEnd = _s.lockOnSessionEnd;
 
     // Show the consent prompt when a new incoming connection is pending.
     ref.listen<RemoteService>(remoteServiceProvider, (prev, next) {

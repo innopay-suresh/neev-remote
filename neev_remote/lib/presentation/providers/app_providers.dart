@@ -111,6 +111,7 @@ class AppSettings {
   final bool defaultAllowControl; // default: let viewers control this device
   final bool defaultAllowClipboard; // default: share the clipboard
   final bool defaultAllowFiles; // default: allow file transfer
+  final bool lockOnSessionEnd; // lock this device when the last viewer leaves
 
   const AppSettings({
     this.relayUrl = '',
@@ -125,6 +126,7 @@ class AppSettings {
     this.defaultAllowControl = true,
     this.defaultAllowClipboard = true,
     this.defaultAllowFiles = true,
+    this.lockOnSessionEnd = false,
   });
 
   bool get unattendedEnabled => unattendedPassword.isNotEmpty;
@@ -142,6 +144,7 @@ class AppSettings {
     bool? defaultAllowControl,
     bool? defaultAllowClipboard,
     bool? defaultAllowFiles,
+    bool? lockOnSessionEnd,
   }) {
     return AppSettings(
       relayUrl: relayUrl ?? this.relayUrl,
@@ -157,6 +160,7 @@ class AppSettings {
       defaultAllowClipboard:
           defaultAllowClipboard ?? this.defaultAllowClipboard,
       defaultAllowFiles: defaultAllowFiles ?? this.defaultAllowFiles,
+      lockOnSessionEnd: lockOnSessionEnd ?? this.lockOnSessionEnd,
     );
   }
 }
@@ -182,6 +186,7 @@ class SettingsNotifier extends StateNotifier<AppSettings> {
   static const _kPermControl = 'defaultAllowControl';
   static const _kPermClip = 'defaultAllowClipboard';
   static const _kPermFiles = 'defaultAllowFiles';
+  static const _kLockEnd = 'lockOnSessionEnd';
 
   Future<void> _load() async {
     final prefs = await SharedPreferences.getInstance();
@@ -197,6 +202,7 @@ class SettingsNotifier extends StateNotifier<AppSettings> {
       defaultAllowControl: prefs.getBool(_kPermControl),
       defaultAllowClipboard: prefs.getBool(_kPermClip),
       defaultAllowFiles: prefs.getBool(_kPermFiles),
+      lockOnSessionEnd: prefs.getBool(_kLockEnd),
     );
   }
 
@@ -213,6 +219,12 @@ class SettingsNotifier extends StateNotifier<AppSettings> {
     await prefs.setBool(_kPermControl, state.defaultAllowControl);
     await prefs.setBool(_kPermClip, state.defaultAllowClipboard);
     await prefs.setBool(_kPermFiles, state.defaultAllowFiles);
+    await prefs.setBool(_kLockEnd, state.lockOnSessionEnd);
+  }
+
+  void setLockOnSessionEnd(bool v) {
+    state = state.copyWith(lockOnSessionEnd: v);
+    _save();
   }
 
   void setAskOnConnect(bool v) {

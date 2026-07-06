@@ -780,8 +780,14 @@ class RemoteService extends ChangeNotifier {
   }
 
   // Safety: never leave the host blanked + input-blocked with no one watching.
+  /// Lock this device when the last viewer disconnects (Settings → Security).
+  bool lockOnSessionEnd = false;
+
   void _disablePrivacyIfNoViewers() {
-    if (_hostPeers.isEmpty) PrivacyMode.set(false);
+    if (_hostPeers.isEmpty) {
+      PrivacyMode.set(false);
+      if (lockOnSessionEnd) lockMachine();
+    }
   }
 
   // ---- In-session chat (works both directions over the control channel) ----

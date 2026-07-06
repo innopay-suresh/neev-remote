@@ -83,6 +83,15 @@ class SettingsPage extends ConsumerWidget {
                       .read(settingsProvider.notifier)
                       .setDefaultPermission(files: v),
                 ),
+                const Divider(),
+                _buildToggle(
+                  label: 'Lock this device on session end',
+                  subtitle: 'Lock the screen when the last viewer disconnects',
+                  value: settings.lockOnSessionEnd,
+                  onChanged: (v) => ref
+                      .read(settingsProvider.notifier)
+                      .setLockOnSessionEnd(v),
+                ),
               ]),
 
               const SizedBox(height: AppSpacing.xl),
