@@ -65,7 +65,7 @@ if (-not (Test-Path $vcvars)) { throw "vcvars64.bat not found — cannot build t
 if (Test-Path $outExe) { Remove-Item $outExe -Force }
 $bat = @"
 call "$vcvars"
-cl /nologo /EHsc /O2 /DUNICODE /D_UNICODE "$helperSrc" /Fe:"$outExe" /Fo:"$env:TEMP\neev_helper.obj" /link advapi32.lib user32.lib gdi32.lib gdiplus.lib ole32.lib wtsapi32.lib userenv.lib ws2_32.lib
+cl /nologo /EHsc /O2 /DUNICODE /D_UNICODE "$helperSrc" /Fe:"$outExe" /Fo:"$env:TEMP\neev_helper.obj" /link advapi32.lib user32.lib gdi32.lib gdiplus.lib ole32.lib shell32.lib wtsapi32.lib userenv.lib ws2_32.lib
 "@
 $batFile = Join-Path $env:TEMP "build_neev_helper.bat"
 Set-Content -Path $batFile -Value $bat -Encoding Ascii
