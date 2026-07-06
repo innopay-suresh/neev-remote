@@ -4,39 +4,198 @@ import '../../core/theme/app_theme.dart';
 import '../../data/services/remote_service.dart';
 import '../providers/app_providers.dart';
 
-class SettingsPage extends ConsumerWidget {
+class _SettingsSection {
+  final IconData icon;
+  final String label;
+  const _SettingsSection(this.icon, this.label);
+}
+
+const _settingsSections = [
+  _SettingsSection(Icons.tune_rounded, 'General'),
+  _SettingsSection(Icons.shield_outlined, 'Security'),
+  _SettingsSection(Icons.desktop_windows_outlined, 'Display'),
+  _SettingsSection(Icons.dns_outlined, 'Connection'),
+  _SettingsSection(Icons.info_outline_rounded, 'About'),
+];
+
+/// AnyDesk-style settings: a left section list + a content pane on the right.
+class SettingsPage extends ConsumerStatefulWidget {
   const SettingsPage({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final settings = ref.watch(settingsProvider);
+  ConsumerState<SettingsPage> createState() => _SettingsPageState();
+}
 
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(AppSpacing.xl),
-      child: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 600),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+class _SettingsPageState extends ConsumerState<SettingsPage> {
+  int _section = 0;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        // Section list
+        Container(
+          width: 190,
+          decoration: const BoxDecoration(
+            border: Border(right: BorderSide(color: AppColors.border)),
+          ),
+          child: ListView(
+            padding: const EdgeInsets.symmetric(vertical: AppSpacing.md),
             children: [
-              Text('Settings', style: AppTypography.heading1),
-              const SizedBox(height: AppSpacing.xl),
-
-              // Connection Settings
-              _buildSectionHeader('Connection'),
-              _buildSettingsCard([
-                const _RelayUrlField(),
-                const Divider(),
-                _buildToggle(
-                  label: 'View Only Mode',
-                  subtitle: 'Disable keyboard and mouse input',
-                  value: settings.viewOnly,
-                  onChanged: (_) => ref.read(settingsProvider.notifier).toggleViewOnly(),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(AppSpacing.lg, AppSpacing.sm,
+                    AppSpacing.lg, AppSpacing.md),
+                child: Text('Settings', style: AppTypography.heading2),
+              ),
+              for (var i = 0; i < _settingsSections.length; i++)
+                _navRow(i, _settingsSections[i]),
+            ],
+          ),
+        ),
+        // Content pane
+        Expanded(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(AppSpacing.xl),
+            child: Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 620),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: _sectionContent(),
                 ),
-              ]),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
 
-              const SizedBox(height: AppSpacing.xl),
+  Widget _navRow(int i, _SettingsSection s) {
+    final selected = i == _section;
+    return InkWell(
+      onTap: () => setState(() => _section = i),
+      child: Container(
+        padding: const EdgeInsets.symmetric(
+            horizontal: AppSpacing.lg, vertical: 10),
+        color: selected ? AppColors.primarySoft : Colors.transparent,
+        child: Row(children: [
+          Icon(s.icon,
+              size: 18,
+              color: selected ? AppColors.primary : AppColors.textSecondary),
+          const SizedBox(width: 10),
+          Text(s.label,
+              style: AppTypography.body.copyWith(
+                  color: selected ? AppColors.primary : AppColors.textPrimary,
+                  fontWeight:
+                      selected ? FontWeight.w600 : FontWeight.w400)),
+        ]),
+      ),
+    );
+  }
 
+  List<Widget> _sectionContent() {
+    final settings = ref.watch(settingsProvider);
+    switch (_section) {
+      case 1:
+        return _securitySection(settings);
+      case 2:
+        return _displaySection(settings);
+      case 3:
+        return _connectionSection(settings);
+      case 4:
+        return _aboutSection();
+      default:
+        return _generalSection(settings);
+    }
+  }
+
+  List<Widget> _generalSection(AppSettings settings) {
+    return [
+      _buildSectionHeader('Application'),
+      _buildSettingsCard([
+        _buildToggle(
+          label: 'Auto answer',
+          subtitle: 'Automatically accept incoming connections',
+          value: settings.autoAnswer,
+          onChanged: (_) =>
+              ref.read(settingsProvider.notifier).toggleAutoAnswer(),
+        ),
+        const Divider(),
+        _buildToggle(
+          label: 'Start on boot',
+          subtitle: 'Launch Neev Remote when the system starts',
+          value: settings.startOnBoot,
+          onChanged: (_) =>
+              ref.read(settingsProvider.notifier).toggleStartOnBoot(),
+        ),
+      ]),
+    ];
+  }
+
+  List<Widget> _connectionSection(AppSettings settings) {
+    return [
+      _buildSectionHeader('Connection'),
+      _buildSettingsCard([
+        const _RelayUrlField(),
+        const Divider(),
+        _buildToggle(
+          label: 'View only mode',
+          subtitle: 'Watch without sending keyboard or mouse input',
+          value: settings.viewOnly,
+          onChanged: (_) =>
+              ref.read(settingsProvider.notifier).toggleViewOnly(),
+        ),
+      ]),
+    ];
+  }
+
+  List<Widget> _displaySection(AppSettings settings) {
+    return [
+      _buildSectionHeader('Video'),
+      _buildSettingsCard([
+        _buildSlider(
+          label: 'Bitrate',
+          value: settings.videoBitrate.toDouble(),
+          min: 500,
+          max: 5000,
+          divisions: 9,
+          suffix: 'kbps',
+          onChanged: (v) => ref
+              .read(settingsProvider.notifier)
+              .updateVideoBitrate(v.toInt()),
+        ),
+        const Divider(),
+        _buildSlider(
+          label: 'Frame rate',
+          value: settings.videoFps.toDouble(),
+          min: 15,
+          max: 60,
+          divisions: 3,
+          suffix: 'fps',
+          onChanged: (v) =>
+              ref.read(settingsProvider.notifier).updateVideoFps(v.toInt()),
+        ),
+      ]),
+    ];
+  }
+
+  List<Widget> _aboutSection() {
+    return [
+      _buildSectionHeader('About'),
+      _buildSettingsCard([
+        _buildInfoRow('Version', '1.0.0'),
+        const Divider(),
+        _buildInfoRow('Platform', 'Desktop'),
+        const Divider(),
+        _buildInfoRow('Engine', 'WebRTC (native)'),
+      ]),
+    ];
+  }
+
+  List<Widget> _securitySection(AppSettings settings) {
+    return [
               // Security — incoming access + default permissions (AnyDesk parity)
               _buildSectionHeader('Security'),
               _buildSettingsCard([
@@ -93,69 +252,7 @@ class SettingsPage extends ConsumerWidget {
                       .setLockOnSessionEnd(v),
                 ),
               ]),
-
-              const SizedBox(height: AppSpacing.xl),
-
-              // Video Settings
-              _buildSectionHeader('Video'),
-              _buildSettingsCard([
-                _buildSlider(
-                  label: 'Bitrate',
-                  value: settings.videoBitrate.toDouble(),
-                  min: 500,
-                  max: 5000,
-                  divisions: 9,
-                  suffix: 'kbps',
-                  onChanged: (v) => ref.read(settingsProvider.notifier).updateVideoBitrate(v.toInt()),
-                ),
-                const Divider(),
-                _buildSlider(
-                  label: 'Frame Rate',
-                  value: settings.videoFps.toDouble(),
-                  min: 15,
-                  max: 60,
-                  divisions: 3,
-                  suffix: 'fps',
-                  onChanged: (v) => ref.read(settingsProvider.notifier).updateVideoFps(v.toInt()),
-                ),
-              ]),
-
-              const SizedBox(height: AppSpacing.xl),
-
-              // Agent Settings
-              _buildSectionHeader('Agent'),
-              _buildSettingsCard([
-                _buildToggle(
-                  label: 'Auto Answer',
-                  subtitle: 'Automatically accept incoming connections',
-                  value: settings.autoAnswer,
-                  onChanged: (_) => ref.read(settingsProvider.notifier).toggleAutoAnswer(),
-                ),
-                const Divider(),
-                _buildToggle(
-                  label: 'Start on Boot',
-                  subtitle: 'Launch agent when system starts',
-                  value: settings.startOnBoot,
-                  onChanged: (_) => ref.read(settingsProvider.notifier).toggleStartOnBoot(),
-                ),
-              ]),
-
-              const SizedBox(height: AppSpacing.xl),
-
-              // About
-              _buildSectionHeader('About'),
-              _buildSettingsCard([
-                _buildInfoRow('Version', '1.0.0'),
-                const Divider(),
-                _buildInfoRow('Flutter', 'Desktop'),
-                const Divider(),
-                _buildInfoRow('WebRTC', 'Native'),
-              ]),
-            ],
-          ),
-        ),
-      ),
-    );
+    ];
   }
 
   Widget _buildSectionHeader(String title) {
